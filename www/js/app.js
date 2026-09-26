@@ -439,7 +439,13 @@
     try {
       await window.Rec.start(onLevel);
     } catch (e) {
-      toast('无法使用麦克风，请检查录音权限');
+      const name = (e && e.name) || 'Error';
+      let hint;
+      if (name === 'NotAllowedError') hint = '麦克风权限被拒绝，请在系统设置里允许 Spark 使用麦克风';
+      else if (name === 'NotFoundError') hint = '没有找到可用的麦克风';
+      else if (name === 'NotReadableError') hint = '麦克风被其他应用占用，请关掉后重试';
+      else hint = '无法使用麦克风（' + name + '）';
+      toast(hint);
       return;
     }
     fetchLocation();

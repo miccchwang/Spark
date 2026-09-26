@@ -40,6 +40,11 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Spark: voice capture -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <!-- Required by Capacitor's WebView audio-capture check: its onPermissionRequest
+         grants the page microphone access only when RECORD_AUDIO *and*
+         MODIFY_AUDIO_SETTINGS are both granted. Without this line the request is
+         always denied, even after the user allows the microphone. -->
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <uses-permission android:name="android.permission.VIBRATE" />
     <!-- Spark: where the idea was captured -->
     <uses-permission android:name="android.permission.ACCESS_COARSE_LOCATION" />
