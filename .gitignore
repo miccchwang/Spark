@@ -1,0 +1,14 @@
+# Dependencies
+node_modules/
+
+# Gradle / Android build output is covered by android/.gitignore
+.gradle/
+
+# OS / editor noise
+.DS_Store
+*.log
+.idea/
+*.iml
+
+# The browser preview is generated from www/ by tools/ — not source
+dist/Spark-preview.html

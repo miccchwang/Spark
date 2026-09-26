@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1,user-scalable=no">
+<meta name="theme-color" content="#0f1115">
+<meta name="color-scheme" content="dark light">
+<title>Spark</title>
+<link rel="stylesheet" href="css/app.css">
+</head>
+<body>
+
+<header class="topbar">
+  <div class="brand">
+    <span class="brand-mark">✦</span>
+    <div class="brand-text">
+      <h1 id="viewTitle">收件箱</h1>
+      <p id="viewSub">0 个灵感</p>
+    </div>
+  </div>
+  <div class="topbar-actions">
+    <button class="icon-btn" id="searchBtn" aria-label="搜索">🔍</button>
+    <button class="icon-btn" id="themeBtn" aria-label="切换主题">☀️</button>
+    <button class="icon-btn" id="dataBtn" aria-label="备份与存储">⋯</button>
+  </div>
+</header>
+
+<div class="searchbar" id="searchBar" hidden>
+  <input type="search" id="searchInput" placeholder="搜索灵感标题或备注…" autocomplete="off">
+  <button class="icon-btn" id="searchClose" aria-label="关闭搜索">✕</button>
+</div>
+
+<!-- 项目轨道：既是导航，也是拖拽归档的投放目标 -->
+<nav class="rail" id="projectRail" aria-label="项目列表"></nav>
+
+<main class="list" id="ideaList"></main>
+
+<!-- 底部录音区 -->
+<div class="recordbar">
+  <div class="rec-meta" id="recMeta">按住不放可以拖到项目里归档</div>
+  <button class="rec-btn" id="recBtn" aria-label="录音">
+    <span class="rec-dot"></span>
+  </button>
+</div>
+
+<!-- 录音中浮层 -->
+<div class="recpanel" id="recPanel" hidden>
+  <div class="recpanel-inner">
+    <div class="rec-time" id="recTime">00:00</div>
+    <div class="level" id="recLevel"></div>
+    <div class="recpanel-actions">
+      <button class="ghost-btn" id="recCancel">丢弃</button>
+      <button class="solid-btn" id="recStop">完成</button>
+    </div>
+  </div>
+</div>
+
+<!-- 灵感详情 -->
+<div class="sheet" id="detailSheet" hidden>
+  <div class="sheet-card">
+    <div class="sheet-head">
+      <h2 id="dTitle">灵感</h2>
+      <button class="icon-btn" data-close="detailSheet">✕</button>
+    </div>
+    <div class="player">
+      <button class="play-btn" id="dPlay">▶️</button>
+      <input type="range" id="dSeek" min="0" max="100" value="0" step="0.1">
+      <span class="time" id="dDur">00:00</span>
+    </div>
+    <input type="text" id="dName" class="field" placeholder="给这个灵感起个名字">
+    <textarea id="dNote" class="field" rows="3" placeholder="补充文字备注…"></textarea>
+    <div class="meta" id="dMeta"></div>
+    <div class="sheet-actions">
+      <button class="ghost-btn" id="dMove">移动到…</button>
+      <button class="danger-btn" id="dDelete">删除</button>
+    </div>
+  </div>
+</div>
+
+<!-- 新建项目 -->
+<div class="sheet" id="projectSheet" hidden>
+  <div class="sheet-card">
+    <div class="sheet-head">
+      <h2>新建项目</h2>
+      <button class="icon-btn" data-close="projectSheet">✕</button>
+    </div>
+    <input type="text" id="pName" class="field" placeholder="项目名称，例如「新 App 点子」" autocomplete="off">
+    <div class="emoji-row" id="pEmoji"></div>
+    <button class="solid-btn wide" id="pCreate">创建项目</button>
+  </div>
+</div>
+
+<!-- 移动到项目 -->
+<div class="sheet" id="moveSheet" hidden>
+  <div class="sheet-card">
+    <div class="sheet-head">
+      <h2>归档到项目</h2>
+      <button class="icon-btn" data-close="moveSheet">✕</button>
+    </div>
+    <div class="move-list" id="moveList"></div>
+  </div>
+</div>
+
+<!-- 备份与存储 -->
+<div class="sheet" id="dataSheet" hidden>
+  <div class="sheet-card">
+    <div class="sheet-head">
+      <h2>备份与存储</h2>
+      <button class="icon-btn" data-close="dataSheet">✕</button>
+    </div>
+
+    <div class="stat-grid" id="statGrid"></div>
+
+    <div class="warnbox" id="persistBox" hidden>
+      <span id="persistText"></span>
+      <button class="mini-btn" id="persistBtn" hidden>开启</button>
+    </div>
+
+    <button class="solid-btn wide" id="bExport">导出备份</button>
+    <button class="ghost-btn wide" id="bImport">从备份导入</button>
+    <input type="file" id="bFile" accept=".zip,.spark,application/zip" hidden>
+
+    <p class="hint">
+      备份是一个 <b>.zip</b> 文件，里面有灵感清单和每段录音的原文件，在电脑上也能直接打开试听。
+      导入采用合并方式，已存在的灵感不会被覆盖。
+    </p>
+  </div>
+</div>
+
+<div class="toast" id="toast" hidden></div>
+
+<script src="js/db.js"></script>
+<script src="js/zip.js"></script>
+<script src="js/backup.js"></script>
+<script src="js/recorder.js"></script>
+<script src="js/dnd.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
