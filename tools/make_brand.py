@@ -33,11 +33,13 @@ PNG_DIR = os.path.join(ROOT, 'assets', 'brand', 'png')
 MARK_SRC = os.path.join(SVG_DIR, 'spark-mark.svg')
 FONT_SRC = os.path.join(ROOT, 'assets', 'brand', 'fonts', 'PlayfairDisplay.ttf')
 
-INK = '#0F1115'
+INK = '#000000'
 PAPER = '#FFFFFF'
 WORD = 'spark'
 WEIGHT = 500
 TRACKING = 0.012  # em, subtle letterspacing
+
+CHROME = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
 
 
 # ---------------------------------------------------------------- wordmark ---
@@ -106,21 +108,63 @@ def read_mark():
 
 
 # ------------------------------------------------------------------ render ---
+def subset_woff2(font_path, text, weight=WEIGHT):
+    """Return a woff2 byte string containing only the glyphs in `text`."""
+    import io
+    from fontTools import subset as ft_subset
+
+    font = TTFont(font_path)
+    if 'fvar' in font:
+        font = instancer.instantiateVariableFont(font, {'wght': weight}, inplace=False)
+    options = ft_subset.Options()
+    options.flavor = 'woff2'
+    options.layout_features = ['kern', 'liga']
+    options.notdef_outline = True
+    subsetter = ft_subset.Subsetter(options=options)
+    subsetter.populate(text=text)
+    subsetter.subset(font)
+    buf = io.BytesIO()
+    font.flavor = 'woff2'
+    font.save(buf)
+    return buf.getvalue()
+
+
 def render_png(svg_text, size=1024):
-    """Rasterise an SVG string with macOS Quick Look; return a PIL RGBA image."""
+    """Rasterise an SVG string with headless Chrome; returns a PIL RGBA image.
+
+    Chrome renders at the exact aspect ratio with a transparent background,
+    unlike Quick Look which flattens onto white and crops to a square.
+    """
     tmpdir = tempfile.mkdtemp()
-    svg_path = os.path.join(tmpdir, 'render.svg')
+    svg_path = os.path.join(tmpdir, 'art.svg')
+    html_path = os.path.join(tmpdir, 'art.html')
+    png_path = os.path.join(tmpdir, 'art.png')
     with open(svg_path, 'w') as f:
         f.write(svg_text)
+
+    vb = [float(v) for v in svg_text.split('viewBox="', 1)[1].split('"', 1)[0].split()]
+    ar = vb[2] / vb[3]
+    if ar >= 1:
+        w, h = size, max(1, round(size / ar))
+    else:
+        h, w = size, max(1, round(size * ar))
+    html = ('<!DOCTYPE html><html><head><style>'
+            'html,body{margin:0;padding:0;background:transparent}'
+            f'img{{display:block;width:{w}px;height:{h}px}}'
+            '</style></head><body><img src="art.svg"></body></html>')
+    with open(html_path, 'w') as f:
+        f.write(html)
+
     try:
         subprocess.run(
-            ['qlmanage', '-t', '-s', str(size), '-o', tmpdir, svg_path],
-            capture_output=True, timeout=90,
+            [CHROME, '--headless=new', '--disable-gpu', '--hide-scrollbars',
+             '--default-background-color=00000000', '--force-device-scale-factor=1',
+             f'--window-size={w},{h}', f'--screenshot={png_path}', html_path],
+            capture_output=True, timeout=120,
         )
-        out = os.path.join(tmpdir, 'render.svg.png')
-        if not os.path.isfile(out):
-            raise RuntimeError('render failed')
-        img = Image.open(out).convert('RGBA').copy()
+        if not os.path.isfile(png_path):
+            raise RuntimeError('chrome render failed')
+        img = Image.open(png_path).convert('RGBA').copy()
     finally:
         shutil.rmtree(tmpdir, ignore_errors=True)
     return img
@@ -134,13 +178,6 @@ def autocrop(img, pad=0):
     x0, y0 = max(0, x0 - pad), max(0, y0 - pad)
     x1, y1 = min(img.width, x1 + pad), min(img.height, y1 + pad)
     return img.crop((x0, y0, x1, y1))
-
-
-def square_viewbox(w, h, pad_ratio=0.10):
-    side = max(w, h) * (1 + pad_ratio * 2)
-    x = (w - side) / 2
-    y = (h - side) / 2
-    return f'{x:.1f} {y:.1f} {side:.1f} {side:.1f}'
 
 
 def save_png_set(img, name, sizes=(1024, 512, 256, 128, 64)):
@@ -253,36 +290,31 @@ def main():
 
     # ---------------- PNG exports ----------------
     def raster(svg_file):
-        """Rasterise an SVG (Quick Look flattens onto white) and return the RGBA image."""
-        text = open(os.path.join(SVG_DIR, svg_file)).read()
-        vb_now = [float(v) for v in
-                  text.split('viewBox="', 1)[1].split('"', 1)[0].split()]
-        sq = square_viewbox(vb_now[2], vb_now[3], pad_ratio=0.02)
-        text_sq = text.replace(
-            f'viewBox="{vb_now[0]:.1f} {vb_now[1]:.1f} {vb_now[2]:.1f} {vb_now[3]:.1f}"',
-            f'viewBox="{sq}"')
-        return render_png(text_sq, 1024)
+        return render_png(open(os.path.join(SVG_DIR, svg_file)).read(), 1024)
 
     def recolor(img, rgb):
-        """Rebuild a transparent image in `rgb` from dark-art-on-white artwork."""
-        lum = img.convert('L')
+        """Re-tint rendered artwork: Chrome output is ink-on-transparent, so the
+        alpha channel already carries the shape."""
+        alpha = img.getchannel('A')
+        if alpha.getextrema() == (255, 255):           # flattened onto white
+            alpha = Image.eval(img.convert('L'), lambda v: 255 - v)
         out = Image.new('RGBA', img.size, rgb + (0,))
-        out.putalpha(Image.eval(lum, lambda v: 255 - v))
+        out.putalpha(alpha)
         return out
 
     exports = [
-        ('spark-mark.svg', 'spark-mark', (15, 17, 21)),
+        ('spark-mark.svg', 'spark-mark', (0, 0, 0)),
         ('spark-mark.svg', 'spark-mark-white', (255, 255, 255)),
-        ('spark-logo-horizontal.svg', 'spark-logo-horizontal', (15, 17, 21)),
+        ('spark-logo-horizontal.svg', 'spark-logo-horizontal', (0, 0, 0)),
         ('spark-logo-horizontal.svg', 'spark-logo-horizontal-white', (255, 255, 255)),
-        ('spark-logo-stacked.svg', 'spark-logo-stacked', (15, 17, 21)),
+        ('spark-logo-stacked.svg', 'spark-logo-stacked', (0, 0, 0)),
         ('spark-logo-stacked.svg', 'spark-logo-stacked-white', (255, 255, 255)),
     ]
     for svg_file, name, rgb in exports:
         save_png_set(recolor(raster(svg_file), rgb), name)
 
     # ---------------- app icon (black mark on a white plate) ----------------
-    mark_img = autocrop(recolor(raster('spark-mark.svg'), (15, 17, 21)), pad=1)
+    mark_img = autocrop(recolor(raster('spark-mark.svg'), (0, 0, 0)), pad=1)
     PLATE = 1024
     icon_h = int(PLATE * 0.66)
     icon_w = round(mark_img.width * icon_h / mark_img.height)
@@ -303,6 +335,14 @@ def main():
                 f'  </g>')
     open(os.path.join(SVG_DIR, 'spark-favicon.svg'), 'w').write(
         svg_doc([0, 0, PLATE, PLATE], fav_body))
+
+    # ---------------- web wordmark font (tiny subset for the app) ----------------
+    web_fonts = os.path.join(ROOT, 'www', 'fonts')
+    os.makedirs(web_fonts, exist_ok=True)
+    subset = subset_woff2(FONT_SRC, 'sparkSPARK0123456789:.,·')
+    with open(os.path.join(web_fonts, 'playfair-wordmark.woff2'), 'wb') as f:
+        f.write(subset)
+    print(f'web wordmark font: {len(subset) / 1024:.1f} KB')
 
     print('brand kit written to', os.path.dirname(PNG_DIR))
 

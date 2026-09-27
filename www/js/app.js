@@ -9,12 +9,23 @@
     audioEl: null,
     audioId: null,
     currentId: null,
-    newEmoji: '💡',
+    newIcon: 'bulb',
     delArmed: false,
   };
 
   const $ = (s) => document.querySelector(s);
-  const EMOJIS = ['💡', '🚀', '🎯', '🧠', '📚', '🎨', '🏃', '💼', '🌱', '🍜', '✈️', '🧪'];
+
+  /* project marks come from the icon sprite — monochrome, never emoji */
+  const ICONS = ['bulb', 'rocket', 'target', 'brain', 'book', 'palette',
+    'run', 'case', 'sprout', 'bowl', 'plane', 'flask'];
+  const LEGACY_EMOJI = {
+    '💡': 'bulb', '🚀': 'rocket', '🎯': 'target', '🧠': 'brain', '📚': 'book',
+    '🎨': 'palette', '🏃': 'run', '💼': 'case', '🌱': 'sprout', '🍜': 'bowl',
+    '✈️': 'plane', '✈': 'plane', '🧪': 'flask',
+  };
+  const icon = (name, cls) =>
+    '<svg class="ico' + (cls ? ' ' + cls : '') + '"><use href="#i-' + name + '"/></svg>';
+  const iconOf = (p) => (p && (p.icon || LEGACY_EMOJI[p.emoji])) || 'folder';
 
   /* ---------------- helpers ---------------- */
   const pad = (n) => String(n).padStart(2, '0');
@@ -58,9 +69,9 @@
     S.theme = t;
     document.documentElement.dataset.theme = t;
     try { localStorage.setItem('spark.theme', t); } catch (e) { /* ignore */ }
-    $('#themeBtn').textContent = t === 'dark' ? '☀️' : '🌙';
+    $('#themeBtn').innerHTML = icon(t === 'dark' ? 'sun' : 'moon');
     const meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) meta.setAttribute('content', t === 'dark' ? '#0f1115' : '#f5f6f8');
+    if (meta) meta.setAttribute('content', t === 'dark' ? '#000000' : '#ffffff');
   }
 
   /* ---------------- rendering ---------------- */
@@ -87,14 +98,9 @@
     const b = document.createElement('button');
     b.className = 'chip' + (o.active ? ' active' : '');
     b.setAttribute('data-drop', o.drop);
-    const em = document.createElement('span');
-    em.textContent = o.emoji;
-    const nm = document.createElement('span');
-    nm.textContent = o.label;
-    const ct = document.createElement('span');
-    ct.className = 'count';
-    ct.textContent = o.count;
-    b.append(em, nm, ct);
+    b.innerHTML = icon(o.icon) + '<span class="label"></span><span class="count"></span>';
+    b.querySelector('.label').textContent = o.label;
+    b.querySelector('.count').textContent = o.count;
     b.addEventListener('click', () => { S.view = o.drop; render(); });
     if (o.project) attachChipLongPress(b, o.project);
     return b;
@@ -103,13 +109,13 @@
   function renderRail() {
     const rail = $('#projectRail');
     rail.innerHTML = '';
-    rail.appendChild(makeChip({ drop: 'inbox', label: '收件箱', emoji: '📥', count: countIn(null), active: S.view === 'inbox' }));
+    rail.appendChild(makeChip({ drop: 'inbox', label: '收件箱', icon: 'tray', count: countIn(null), active: S.view === 'inbox' }));
     S.projects.forEach((p) => {
-      rail.appendChild(makeChip({ drop: p.id, label: p.name, emoji: p.emoji, count: countIn(p.id), active: S.view === p.id, project: p }));
+      rail.appendChild(makeChip({ drop: p.id, label: p.name, icon: iconOf(p), count: countIn(p.id), active: S.view === p.id, project: p }));
     });
     const add = document.createElement('button');
     add.className = 'chip add';
-    add.textContent = '＋ 新项目';
+    add.innerHTML = icon('plus') + '<span>新项目</span>';
     add.addEventListener('click', openProjectSheet);
     rail.appendChild(add);
   }
@@ -122,8 +128,8 @@
       const e = document.createElement('div');
       e.className = 'empty';
       e.innerHTML = S.query
-        ? '<span class="big">🔍</span>没有匹配的灵感'
-        : '<span class="big">✨</span>这里还空着<br>点下面的按钮，把刚冒出来的想法说出来';
+        ? icon('search', 'lg big') + '没有匹配的灵感'
+        : icon('spark', 'lg big') + '这里还空着<br>点下面的按钮，把刚冒出来的想法说出来';
       list.appendChild(e);
       return;
     }
@@ -135,19 +141,20 @@
     el.className = 'card';
     el.dataset.id = i.id;
     el.innerHTML =
-      '<div class="card-top"><span class="grip">⠿</span><div class="card-body">' +
-      '<p class="card-title"></p><div class="card-meta">' +
+      '<div class="card-top"><span class="grip">' + icon('grip') + '</span>' +
+      '<div class="card-body"><p class="card-title"></p><div class="card-meta">' +
       '<span class="m-when"></span><span class="m-loc"></span><span class="m-dur"></span>' +
       '</div><p class="card-note"></p></div>' +
-      '<button class="play">▶️</button></div>';
+      '<button class="play" aria-label="播放">' + icon('play') + '</button></div>';
 
     const title = el.querySelector('.card-title');
     title.textContent = i.title || '未命名灵感';
     if (!i.title) title.classList.add('untitled');
 
-    el.querySelector('.m-when').textContent = '🕒 ' + fmtWhen(i.createdAt);
-    el.querySelector('.m-loc').textContent = (i.lat == null) ? '📍 无位置' : '📍 ' + i.lat.toFixed(4) + ', ' + i.lon.toFixed(4);
-    el.querySelector('.m-dur').textContent = '⏱️ ' + fmtDur(i.durationMs);
+    el.querySelector('.m-when').innerHTML = icon('clock', 'sm') + '<span>' + fmtWhen(i.createdAt) + '</span>';
+    el.querySelector('.m-loc').innerHTML = icon('pin', 'sm') + '<span>' +
+      (i.lat == null ? '无位置' : i.lat.toFixed(2) + ', ' + i.lon.toFixed(2)) + '</span>';
+    el.querySelector('.m-dur').innerHTML = icon('timer', 'sm') + '<span>' + fmtDur(i.durationMs) + '</span>';
 
     const note = el.querySelector('.card-note');
     if (i.note) { note.textContent = i.note; } else { note.remove(); }
@@ -181,7 +188,9 @@
   /* ---------------- projects ---------------- */
   function openProjectSheet() {
     $('#pName').value = '';
-    S.newEmoji = '💡';
+    S.newIcon = 'bulb';
+    const row = $('#pEmoji');
+    row.querySelectorAll('button').forEach((b, i) => b.classList.toggle('sel', i === 0));
     $('#projectSheet').hidden = false;
     setTimeout(() => $('#pName').focus(), 120);
   }
@@ -189,7 +198,7 @@
   async function createProject() {
     const name = $('#pName').value.trim();
     if (!name) { toast('先给项目起个名字'); return; }
-    const p = { id: window.DB.uid(), name, emoji: S.newEmoji, createdAt: Date.now() };
+    const p = { id: window.DB.uid(), name, icon: S.newIcon, createdAt: Date.now() };
     await window.DB.put('projects', p);
     S.projects.push(p);
     $('#projectSheet').hidden = true;
@@ -221,8 +230,8 @@
     const h = document.createElement('h2');
     h.textContent = title;
     const x = document.createElement('button');
-    x.className = 'icon-btn';
-    x.textContent = '✕';
+    x.className = 'icon-btn bare';
+    x.innerHTML = icon('close');
     x.addEventListener('click', () => wrap.remove());
     head.append(h, x);
     card.appendChild(head);
@@ -231,7 +240,12 @@
     items.forEach((it) => {
       const b = document.createElement('button');
       b.className = 'move-item';
-      b.textContent = it.label;
+      if (it.icon) {
+        b.innerHTML = icon(it.icon) + '<span></span>';
+        b.querySelector('span').textContent = it.label;
+      } else {
+        b.textContent = it.label;
+      }
       b.addEventListener('click', () => { wrap.remove(); if (it.run) it.run(); });
       list.appendChild(b);
     });
@@ -241,24 +255,48 @@
     document.body.appendChild(wrap);
   }
 
+  function openIconPicker(p) {
+    const wrap = document.createElement('div');
+    wrap.className = 'sheet';
+    wrap.innerHTML =
+      '<div class="sheet-card"><div class="grabber"></div>' +
+      '<div class="sheet-head"><h2>项目图标</h2>' +
+      '<button class="icon-btn bare" data-x>' + icon('close') + '</button></div>' +
+      '<div class="pick-row"></div></div>';
+    const row = wrap.querySelector('.pick-row');
+    ICONS.forEach((n) => {
+      const b = document.createElement('button');
+      b.innerHTML = icon(n);
+      if (iconOf(p) === n) b.classList.add('sel');
+      b.addEventListener('click', async () => {
+        p.icon = n;
+        delete p.emoji;
+        await window.DB.put('projects', p);
+        wrap.remove();
+        render();
+      });
+      row.appendChild(b);
+    });
+    wrap.querySelector('[data-x]').addEventListener('click', () => wrap.remove());
+    wrap.addEventListener('click', (e) => { if (e.target === wrap) wrap.remove(); });
+    document.body.appendChild(wrap);
+  }
+
   function projectActions(p) {
-    showActions(p.emoji + ' ' + p.name, [
+    showActions(p.name, [
       {
-        label: '✏️ 重命名',
+        label: '重命名', icon: 'edit',
         run: async () => {
           const n = prompt('新项目名称', p.name);
           if (n && n.trim()) { p.name = n.trim(); await window.DB.put('projects', p); render(); }
         },
       },
       {
-        label: '🎨 换图标',
-        run: async () => {
-          const e = prompt('输入一个 emoji 作为图标', p.emoji);
-          if (e && e.trim()) { p.emoji = e.trim().slice(0, 4); await window.DB.put('projects', p); render(); }
-        },
+        label: '换图标', icon: 'palette',
+        run: () => openIconPicker(p),
       },
       {
-        label: '🗑️ 删除项目',
+        label: '删除项目', icon: 'trash',
         run: async () => {
           if (!confirm('删除「' + p.name + '」？其中的灵感会移回收件箱。')) return;
           for (const i of S.ideas) {
@@ -311,12 +349,14 @@
       const card = b.closest('.card');
       if (!card) return;
       const playing = S.audioId === card.dataset.id && S.audioEl && !S.audioEl.paused;
-      b.textContent = playing ? '⏸️' : '▶️';
+      b.innerHTML = icon(playing ? 'pause' : 'play');
+      b.classList.toggle('on', !!playing);
     });
     const dp = $('#dPlay');
     if (dp) {
       const playing = S.audioId === S.currentId && S.audioEl && !S.audioEl.paused;
-      dp.textContent = playing ? '⏸️' : '▶️';
+      dp.innerHTML = icon(playing ? 'pause' : 'play');
+      dp.classList.toggle('on', !!playing);
     }
   }
 
@@ -332,6 +372,10 @@
   }
 
   /* ---------------- detail sheet ---------------- */
+  function metaRow(name, html) {
+    return '<div class="row">' + icon(name, 'sm') + '<span>' + html + '</span></div>';
+  }
+
   function openDetail(id) {
     const i = findIdea(id);
     if (!i) return;
@@ -340,15 +384,19 @@
     $('#dName').value = i.title || '';
     $('#dNote').value = i.note || '';
     $('#dDelete').textContent = '删除';
+    $('#dDelete').classList.remove('armed');
     $('#detailSheet').hidden = false;
 
     const where = i.lat == null
-      ? '📍 未记录位置'
-      : '📍 ' + i.lat.toFixed(5) + ', ' + i.lon.toFixed(5) +
+      ? '未记录位置'
+      : i.lat.toFixed(5) + ', ' + i.lon.toFixed(5) +
         ' · <a href="geo:0,0?q=' + i.lat + ',' + i.lon + '">在地图中查看</a>';
-    const inProj = i.projectId ? '🗂️ ' + projName(i.projectId) : '🗂️ 收件箱（未归档）';
+    const inProj = i.projectId ? projName(i.projectId) : '收件箱（未归档）';
     $('#dMeta').innerHTML =
-      '🕒 ' + fmtFull(i.createdAt) + '<br>' + where + '<br>' + inProj + '<br>⏱️ 时长 ' + fmtDur(i.durationMs);
+      metaRow('clock', fmtFull(i.createdAt)) +
+      metaRow('pin', where) +
+      metaRow('folder', inProj) +
+      metaRow('timer', '时长 ' + fmtDur(i.durationMs));
     $('#dDur').textContent = '00:00';
     $('#dSeek').value = 0;
     syncPlayIcons();
@@ -366,7 +414,12 @@
   async function deleteIdea() {
     const i = findIdea(S.currentId);
     if (!i) return;
-    if (!S.delArmed) { S.delArmed = true; $('#dDelete').textContent = '确认删除？'; return; }
+    if (!S.delArmed) {
+      S.delArmed = true;
+      $('#dDelete').textContent = '确认删除？';
+      $('#dDelete').classList.add('armed');
+      return;
+    }
     if (S.audioId === i.id) stopAudio();
     await window.DB.del('ideas', i.id);
     await window.DB.del('audio', i.id);
@@ -381,11 +434,13 @@
     if (!i) return;
     const box = $('#moveList');
     box.innerHTML = '';
-    const opts = [{ id: null, name: '收件箱', emoji: '📥' }].concat(S.projects);
+    const opts = [{ id: null, name: '收件箱', icon: 'tray' }].concat(S.projects);
     opts.forEach((p) => {
+      const here = (i.projectId || null) === p.id;
       const b = document.createElement('button');
-      b.className = 'move-item' + ((i.projectId || null) === p.id ? ' current' : '');
-      b.textContent = p.emoji + ' ' + p.name + ((i.projectId || null) === p.id ? '（当前）' : '');
+      b.className = 'move-item' + (here ? ' current' : '');
+      b.innerHTML = icon(p.icon || 'tray') + '<span></span>' + (here ? '<span class="tag">当前</span>' : '');
+      b.querySelector('span').textContent = p.name;
       b.addEventListener('click', async () => {
         i.projectId = p.id;
         await window.DB.put('ideas', i);
@@ -538,12 +593,14 @@
     wrap.hidden = false;
     if (info.persisted) {
       wrap.classList.add('ok');
+      wrap.querySelector('.ico').outerHTML = icon('check');
       btn.hidden = true;
-      txt.textContent = '✓ 已开启持久化存储，系统不会自动清理这些灵感。';
+      txt.textContent = '已开启持久化存储，系统不会自动清理这些灵感。';
     } else {
       wrap.classList.remove('ok');
+      wrap.querySelector('.ico').outerHTML = icon('warn');
       btn.hidden = false;
-      txt.textContent = '⚠️ 持久化存储未开启，系统在空间紧张时可能清掉录音。建议先导出备份。';
+      txt.textContent = '持久化存储未开启，系统在空间紧张时可能清掉录音。建议先导出备份。';
     }
   }
 
@@ -646,11 +703,13 @@
     });
 
     const row = $('#pEmoji');
-    EMOJIS.forEach((e) => {
+    ICONS.forEach((n) => {
       const b = document.createElement('button');
-      b.textContent = e;
+      b.type = 'button';
+      b.innerHTML = icon(n);
+      b.setAttribute('aria-label', n);
       b.addEventListener('click', () => {
-        S.newEmoji = e;
+        S.newIcon = n;
         row.querySelectorAll('button').forEach((x) => x.classList.remove('sel'));
         b.classList.add('sel');
       });

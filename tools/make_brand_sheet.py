@@ -9,9 +9,8 @@ SVG = os.path.join(BRAND, 'svg')
 PNG = os.path.join(BRAND, 'png')
 OUT = os.path.join(BRAND, 'brand-sheet.html')
 
-INK = '#0F1115'
+INK = '#000000'
 PAPER = '#FFFFFF'
-ACCENT = '#FF8A3D'
 
 
 def svg_uri(path):
@@ -76,14 +75,12 @@ HTML = f'''<!DOCTYPE html>
   :root {{
     --ink: {INK};
     --paper: {PAPER};
-    --accent: {ACCENT};
-    --line: #E3E6EB;
-    --muted: #6B7280;
+    --line: {INK};
   }}
   * {{ box-sizing: border-box; }}
   body {{
     margin: 0;
-    background: #F5F6F8;
+    background: var(--paper);
     color: var(--ink);
     font-family: -apple-system, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
     -webkit-font-smoothing: antialiased;
@@ -92,9 +89,9 @@ HTML = f'''<!DOCTYPE html>
   header {{ display: flex; align-items: center; justify-content: space-between; gap: 24px;
             padding-bottom: 28px; border-bottom: 1px solid var(--line); flex-wrap: wrap; }}
   header img {{ height: 54px; display: block; }}
-  .meta {{ text-align: right; font-size: 12px; color: var(--muted); line-height: 1.7; letter-spacing: .02em; }}
+  .meta {{ text-align: right; font-size: 12px; color: var(--ink); opacity: .62; line-height: 1.7; letter-spacing: .02em; }}
   .meta b {{ color: var(--ink); font-weight: 600; }}
-  h2 {{ font-size: 13px; text-transform: uppercase; letter-spacing: .16em; color: var(--muted);
+  h2 {{ font-size: 13px; text-transform: uppercase; letter-spacing: .16em; color: var(--ink); opacity: .62;
         font-weight: 600; margin: 56px 0 18px; }}
   .grid {{ display: grid; gap: 18px; }}
   .g2 {{ grid-template-columns: 1fr 1fr; }}
@@ -102,9 +99,9 @@ HTML = f'''<!DOCTYPE html>
   .card {{ background: var(--paper); border: 1px solid var(--line); border-radius: 16px;
            padding: 34px 28px; display: flex; flex-direction: column; align-items: center;
            justify-content: center; gap: 18px; min-height: 190px; }}
-  .card.dark {{ background: var(--ink); border-color: #232833; }}
-  .card .cap {{ font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--muted); }}
-  .card.dark .cap {{ color: #8B94A3; }}
+  .card.dark {{ background: var(--ink); border-color: var(--ink); }}
+  .card .cap {{ font-size: 11px; letter-spacing: .12em; text-transform: uppercase; color: var(--ink); opacity: .62; }}
+  .card.dark .cap {{ color: var(--paper); opacity: .62; }}
   .card img {{ max-width: 100%; display: block; }}
   .mark-sm {{ height: 74px; }}
   .lock {{ height: 62px; }}
@@ -115,17 +112,17 @@ HTML = f'''<!DOCTYPE html>
   .icon-row img {{ border-radius: 22%; display: block; }}
   table {{ width: 100%; border-collapse: collapse; font-size: 13px; }}
   td, th {{ text-align: left; padding: 12px 14px; border-bottom: 1px solid var(--line); vertical-align: middle; }}
-  th {{ font-size: 11px; text-transform: uppercase; letter-spacing: .12em; color: var(--muted); font-weight: 600; }}
+  th {{ font-size: 11px; text-transform: uppercase; letter-spacing: .12em; color: var(--ink); opacity: .62; font-weight: 600; }}
   .swatch {{ display: inline-block; width: 26px; height: 26px; border-radius: 7px;
              border: 1px solid var(--line); vertical-align: middle; margin-right: 10px; }}
-  code {{ font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--muted); }}
+  code {{ font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; color: var(--ink); opacity: .62; }}
   .type-sample {{ font-family: "Playfair Display", Georgia, serif; font-size: 58px; line-height: 1;
                   letter-spacing: .01em; margin: 0; }}
-  .type-note {{ font-size: 12px; color: var(--muted); line-height: 1.8; }}
-  ul {{ margin: 0; padding-left: 18px; font-size: 13px; color: var(--muted); line-height: 2; }}
+  .type-note {{ font-size: 12px; color: var(--ink); opacity: .62; line-height: 1.8; }}
+  ul {{ margin: 0; padding-left: 18px; font-size: 13px; color: var(--ink); opacity: .62; line-height: 2; }}
   ul b {{ color: var(--ink); font-weight: 600; }}
   footer {{ margin-top: 64px; padding-top: 22px; border-top: 1px solid var(--line);
-            font-size: 12px; color: var(--muted); display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; }}
+            font-size: 12px; color: var(--ink); opacity: .62; display: flex; justify-content: space-between; flex-wrap: wrap; gap: 8px; }}
   @media (max-width: 720px) {{
     .g2, .g3 {{ grid-template-columns: 1fr; }}
     .meta {{ text-align: left; }}
@@ -184,10 +181,13 @@ HTML = f'''<!DOCTYPE html>
   <div class="card" style="align-items:stretch">
     <table>
       <tr><th>Role</th><th>Value</th><th>Use</th></tr>
-      <tr><td><span class="swatch" style="background:{INK}"></span>Ink</td><td><code>{INK}</code></td><td>All logo artwork, dark UI surface</td></tr>
-      <tr><td><span class="swatch" style="background:{PAPER}"></span>Paper</td><td><code>{PAPER}</code></td><td>Logo background, light UI surface</td></tr>
-      <tr><td><span class="swatch" style="background:{ACCENT}"></span>Spark accent</td><td><code>{ACCENT}</code></td><td>In-product only: record button, active states. Never in the logo.</td></tr>
+      <tr><td><span class="swatch" style="background:{INK}"></span>Ink</td><td><code>{INK}</code></td><td>All logo artwork · dark theme surface · text on paper</td></tr>
+      <tr><td><span class="swatch" style="background:{PAPER}"></span>Paper</td><td><code>{PAPER}</code></td><td>Logo background · light theme surface · text on ink</td></tr>
     </table>
+    <p class="type-note" style="margin:0;text-align:center">
+      <b>Two colours only.</b> Ink and paper swap between themes — nothing else.<br>
+      Hierarchy comes from weight, rules, solid vs. outline, and halftone dots — never from a third colour.
+    </p>
   </div>
 
   <h2>Rules</h2>
@@ -211,7 +211,7 @@ HTML = f'''<!DOCTYPE html>
   </div>
 
   <footer>
-    <span>spark · brand sheet v1.0</span>
+    <span>spark · brand sheet v2.0</span>
     <span>assets/brand/ · svg + png + android mipmaps</span>
   </footer>
 </div>

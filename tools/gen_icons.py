@@ -19,9 +19,9 @@ BRAND = os.path.join(ROOT, 'assets', 'brand', 'png')
 MARK_INK = os.path.join(BRAND, 'spark-mark-1024.png')
 MARK_WHITE = os.path.join(BRAND, 'spark-mark-white-1024.png')
 
-INK = (15, 17, 21, 255)
+INK = (0, 0, 0, 255)
 PAPER = (255, 255, 255, 255)
-SPLASH_BG = (15, 17, 21, 255)
+SPLASH_BG = (0, 0, 0, 255)
 SS = 4  # supersampling
 
 

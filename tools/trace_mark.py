@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Vectorize a flat monochrome line-art PNG into a clean SVG path."""
+"""Vectorize a flat monochrome line-art PNG/JPEG into a clean SVG path.
+
+Usage: trace_mark.py SRC OUT [epsilon] [pad] [color] [threshold]
+"""
 import sys, math
 import numpy as np
 import cv2
@@ -8,13 +11,14 @@ SRC = sys.argv[1]
 OUT = sys.argv[2]
 EPS = float(sys.argv[3]) if len(sys.argv) > 3 else 1.6
 PAD = float(sys.argv[4]) if len(sys.argv) > 4 else 8.0
-COLOR = sys.argv[5] if len(sys.argv) > 5 else "#0F1115"
+COLOR = sys.argv[5] if len(sys.argv) > 5 else "#000000"
+THRESH = float(sys.argv[6]) if len(sys.argv) > 6 else 140.0
 
 img = cv2.imread(SRC, cv2.IMREAD_GRAYSCALE)
 if img is None:
     raise SystemExit("cannot read " + SRC)
 # foreground = dark pixels
-_, bw = cv2.threshold(img, 140, 255, cv2.THRESH_BINARY_INV)
+_, bw = cv2.threshold(img, THRESH, 255, cv2.THRESH_BINARY_INV)
 # remove speckle
 bw = cv2.morphologyEx(bw, cv2.MORPH_OPEN, np.ones((3, 3), np.uint8))
 

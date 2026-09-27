@@ -3,35 +3,86 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,maximum-scale=1,user-scalable=no">
-<meta name="theme-color" content="#0f1115">
+<meta name="theme-color" content="#000000">
 <meta name="color-scheme" content="dark light">
 <title>Spark</title>
 <link rel="icon" href="assets/brand/spark-favicon.svg" type="image/svg+xml">
 <link rel="icon" href="assets/brand/app-icon-32.png" sizes="32x32">
 <link rel="apple-touch-icon" href="assets/brand/app-icon-180.png">
 <meta name="apple-mobile-web-app-title" content="Spark">
+<script>
+/* pick the theme before first paint so there is no flash of the wrong palette */
+(function () {
+  var t = null;
+  try { t = localStorage.getItem('spark.theme'); } catch (e) { /* ignore */ }
+  if (!t) t = (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
+  document.documentElement.dataset.theme = t;
+})();
+</script>
 <link rel="stylesheet" href="css/app.css">
 </head>
 <body>
 
+<!-- ---------- icon sprite: one line system, stroke inherits currentColor ---------- -->
+<svg class="sprite" aria-hidden="true" focusable="false">
+  <symbol id="i-search" viewBox="0 0 24 24"><circle cx="10.6" cy="10.6" r="6.4"/><path d="M15.3 15.3 20.4 20.4"/></symbol>
+  <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4.1"/><path d="M12 2.6v2.3M12 19.1v2.3M2.6 12h2.3M19.1 12h2.3M5.3 5.3l1.7 1.7M17 17l1.7 1.7M18.7 5.3 17 7M7 17l-1.7 1.7"/></symbol>
+  <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20.2 14.6A8.6 8.6 0 0 1 9.4 3.8a8.6 8.6 0 1 0 10.8 10.8Z"/></symbol>
+  <symbol id="i-more" viewBox="0 0 24 24"><circle cx="5.2" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="12" cy="12" r="1.5" fill="currentColor" stroke="none"/><circle cx="18.8" cy="12" r="1.5" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-close" viewBox="0 0 24 24"><path d="M6.2 6.2 17.8 17.8M17.8 6.2 6.2 17.8"/></symbol>
+  <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5.2v13.6M5.2 12h13.6"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M8.6 5.6 18.4 12 8.6 18.4Z" fill="currentColor" stroke="none" stroke-linejoin="round"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><path d="M9.2 5.4v13.2M14.8 5.4v13.2" stroke-width="2.6"/></symbol>
+  <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="2.9" width="6" height="11" rx="3"/><path d="M5.6 11.4a6.4 6.4 0 0 0 12.8 0M12 17.8v3.3M8.6 21.1h6.8"/></symbol>
+  <symbol id="i-clock" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.5"/><path d="M12 7.1V12l3.4 2.1"/></symbol>
+  <symbol id="i-pin" viewBox="0 0 24 24"><path d="M12 20.9s6.3-6 6.3-10.3A6.3 6.3 0 0 0 5.7 10.6c0 4.3 6.3 10.3 6.3 10.3Z"/><circle cx="12" cy="10.4" r="2.3"/></symbol>
+  <symbol id="i-timer" viewBox="0 0 24 24"><circle cx="12" cy="13.4" r="7.5"/><path d="M12 9.6v3.8l2.6 1.6M9.4 3.3h5.2"/></symbol>
+  <symbol id="i-map" viewBox="0 0 24 24"><path d="M9 3.9 3.6 6.3v13.8L9 17.7l6 2.4 5.4-2.4V3.9L15 6.3 9 3.9Z"/><path d="M9 3.9v13.8M15 6.3v13.8"/></symbol>
+  <symbol id="i-tray" viewBox="0 0 24 24"><path d="M3.6 13.4 6.1 4.8h11.8l2.5 8.6v5.8H3.6v-5.8Z"/><path d="M3.6 13.4h4.1l1.3 2.4h6l1.3-2.4h4.1"/></symbol>
+  <symbol id="i-folder" viewBox="0 0 24 24"><path d="M3.6 6.4a1.8 1.8 0 0 1 1.8-1.8h4l2 2.4h7.2a1.8 1.8 0 0 1 1.8 1.8v9a1.8 1.8 0 0 1-1.8 1.8H5.4a1.8 1.8 0 0 1-1.8-1.8V6.4Z"/></symbol>
+  <symbol id="i-grip" viewBox="0 0 24 24"><circle cx="9" cy="6.4" r="1.35" fill="currentColor" stroke="none"/><circle cx="15" cy="6.4" r="1.35" fill="currentColor" stroke="none"/><circle cx="9" cy="12" r="1.35" fill="currentColor" stroke="none"/><circle cx="15" cy="12" r="1.35" fill="currentColor" stroke="none"/><circle cx="9" cy="17.6" r="1.35" fill="currentColor" stroke="none"/><circle cx="15" cy="17.6" r="1.35" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-spark" viewBox="0 0 24 24"><path d="M11 2.6c.8 4.7 1.5 5.4 6.2 6.2-4.7.8-5.4 1.5-6.2 6.2-.8-4.7-1.5-5.4-6.2-6.2 4.7-.8 5.4-1.5 6.2-6.2Z"/><path d="M17.6 14.4c.4 2.2.7 2.5 2.9 2.9-2.2.4-2.5.7-2.9 2.9-.4-2.2-.7-2.5-2.9-2.9 2.2-.4 2.5-.7 2.9-2.9Z"/></symbol>
+  <symbol id="i-edit" viewBox="0 0 24 24"><path d="M4.4 19.6l4.7-1L19.3 8.4a2.2 2.2 0 0 0-3.1-3.1L6 15.4l-1.6 4.2Z"/><path d="M15.1 6.4l2.5 2.5"/></symbol>
+  <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4.2 6.6h15.6M9.6 6.6V4.8h4.8v1.8M6.6 6.6l1 13.1h8.8l1-13.1M10.3 10.2v6.2M13.7 10.2v6.2"/></symbol>
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M5.2 12.7 9.9 17.4 18.8 7.7"/></symbol>
+  <symbol id="i-warn" viewBox="0 0 24 24"><path d="M12 3.8 21.1 19.7H2.9L12 3.8Z"/><path d="M12 9.6v4.4M12 16.7v.1"/></symbol>
+  <symbol id="i-down" viewBox="0 0 24 24"><path d="M12 3.6v10.9M7.9 10.4 12 14.5l4.1-4.1M4.6 19.6h14.8"/></symbol>
+  <symbol id="i-up" viewBox="0 0 24 24"><path d="M12 14.5V3.6M7.9 7.7 12 3.6l4.1 4.1M4.6 19.6h14.8"/></symbol>
+  <symbol id="i-target" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8.3"/><circle cx="12" cy="12" r="4.3"/><circle cx="12" cy="12" r="1.1" fill="currentColor" stroke="none"/></symbol>
+  <symbol id="i-bulb" viewBox="0 0 24 24"><path d="M9.3 17.5h5.4M10.1 20.6h3.8"/><path d="M12 3.4a6 6 0 0 0-3.6 10.8v3.3h7.2v-3.3A6 6 0 0 0 12 3.4Z"/></symbol>
+  <symbol id="i-rocket" viewBox="0 0 24 24"><path d="M12 2.9c2.9 1.9 4.4 4.9 4.4 8.5l-2.4 2.8h-4L7.6 11.4c0-3.6 1.5-6.6 4.4-8.5Z"/><circle cx="12" cy="9" r="1.7"/><path d="M10 14.2 8.3 19l3.7-1.4L15.7 19 14 14.2"/></symbol>
+  <symbol id="i-brain" viewBox="0 0 24 24"><path d="M12 5.3a3.1 3.1 0 0 0-5.9 1.2c-1.4.6-2.2 2-2 3.5.1 1.2.9 2.2 1.9 2.7-.2 1.9 1.3 3.4 3.2 3.4.9 0 1.8-.4 2.4-1.1V5.3Z"/><path d="M12 5.3a3.1 3.1 0 0 1 5.9 1.2c1.4.6 2.2 2 2 3.5-.1 1.2-.9 2.2-1.9 2.7.2 1.9-1.3 3.4-3.2 3.4-.9 0-1.8-.4-2.4-1.1"/></symbol>
+  <symbol id="i-book" viewBox="0 0 24 24"><path d="M4.3 4.7h5.3A2.4 2.4 0 0 1 12 7.1v12a2 2 0 0 0-2-2H4.3V4.7Z"/><path d="M19.7 4.7h-5.3A2.4 2.4 0 0 0 12 7.1v12a2 2 0 0 1 2-2h5.7V4.7Z"/></symbol>
+  <symbol id="i-palette" viewBox="0 0 24 24"><path d="M12 3.5a8.5 8.5 0 0 0 0 17c1.2 0 2-.8 2-1.8 0-.5-.2-1-.6-1.3-.3-.4-.5-.8-.5-1.2 0-1 .8-1.8 1.8-1.8h1.6a4.2 4.2 0 0 0 4.2-4.2c0-3.7-3.8-6.7-8.5-6.7Z"/><circle cx="8.6" cy="10.2" r="1.25"/></symbol>
+  <symbol id="i-run" viewBox="0 0 24 24"><circle cx="15.4" cy="5.1" r="2"/><path d="M14 9.1 10.6 11.8l2.6 3.3-1.3 5.3"/><path d="M14 9.1l3.3 1.8 3-.6"/><path d="M14 9.1 9.4 9.9l-2.5 2.5"/></symbol>
+  <symbol id="i-case" viewBox="0 0 24 24"><rect x="3.5" y="7.5" width="17" height="12.4" rx="2.1"/><path d="M8.6 7.5V5.7a1.8 1.8 0 0 1 1.8-1.8h3.2a1.8 1.8 0 0 1 1.8 1.8v1.8M3.5 12.6h17"/></symbol>
+  <symbol id="i-sprout" viewBox="0 0 24 24"><path d="M12 20.4v-6.5"/><path d="M12 13.9C12 10.7 9.4 8.1 6.2 8.1c0 3.2 2.6 5.8 5.8 5.8Z"/><path d="M12 13.9c0-3.2 2.6-5.8 5.8-5.8 0 3.2-2.6 5.8-5.8 5.8Z"/></symbol>
+  <symbol id="i-bowl" viewBox="0 0 24 24"><path d="M3.7 10.6h16.6a8.3 8.3 0 0 1-8.3 8.3 8.3 8.3 0 0 1-8.3-8.3Z"/><path d="M8.5 7.4c0-1.6 1.5-1.6 1.5-3.2M12 7.4c0-1.6 1.5-1.6 1.5-3.2M15.5 7.4c0-1.6 1.5-1.6 1.5-3.2"/></symbol>
+  <symbol id="i-plane" viewBox="0 0 24 24"><path d="M20.6 3.4 3.5 10.6l6.3 2.4 2.4 6.3 8.4-15.9Z"/><path d="M20.6 3.4 9.8 13"/></symbol>
+  <symbol id="i-flask" viewBox="0 0 24 24"><path d="M9.4 3.4v6L4.9 17.6a2 2 0 0 0 1.7 3h10.8a2 2 0 0 0 1.7-3L14.6 9.4v-6"/><path d="M8.2 3.4h7.6M7.4 14.4h9.2"/></symbol>
+</svg>
+
 <header class="topbar">
   <div class="brand">
     <span class="brand-mark" role="img" aria-label="Spark"></span>
-    <div class="brand-text">
-      <h1 id="viewTitle">收件箱</h1>
-      <p id="viewSub">0 个灵感</p>
-    </div>
+    <span class="brand-word">spark</span>
   </div>
   <div class="topbar-actions">
-    <button class="icon-btn" id="searchBtn" aria-label="搜索">🔍</button>
-    <button class="icon-btn" id="themeBtn" aria-label="切换主题">☀️</button>
-    <button class="icon-btn" id="dataBtn" aria-label="备份与存储">⋯</button>
+    <button class="icon-btn" id="searchBtn" aria-label="搜索"><svg class="ico"><use href="#i-search"/></svg></button>
+    <button class="icon-btn" id="themeBtn" aria-label="切换主题"><svg class="ico"><use href="#i-moon"/></svg></button>
+    <button class="icon-btn" id="dataBtn" aria-label="备份与存储"><svg class="ico"><use href="#i-more"/></svg></button>
   </div>
 </header>
 
+<div class="viewhead">
+  <h1 id="viewTitle">收件箱</h1>
+  <p id="viewSub">0 个灵感</p>
+</div>
+
 <div class="searchbar" id="searchBar" hidden>
+  <svg class="ico"><use href="#i-search"/></svg>
   <input type="search" id="searchInput" placeholder="搜索灵感标题或备注…" autocomplete="off">
-  <button class="icon-btn" id="searchClose" aria-label="关闭搜索">✕</button>
+  <button class="icon-btn bare" id="searchClose" aria-label="关闭搜索"><svg class="ico"><use href="#i-close"/></svg></button>
 </div>
 
 <!-- 项目轨道：既是导航，也是拖拽归档的投放目标 -->
@@ -42,9 +93,7 @@
 <!-- 底部录音区 -->
 <div class="recordbar">
   <div class="rec-meta" id="recMeta">按住不放可以拖到项目里归档</div>
-  <button class="rec-btn" id="recBtn" aria-label="录音">
-    <span class="rec-dot"></span>
-  </button>
+  <button class="rec-btn" id="recBtn" aria-label="录音"><svg class="ico"><use href="#i-mic"/></svg></button>
 </div>
 
 <!-- 录音中浮层 -->
@@ -62,12 +111,13 @@
 <!-- 灵感详情 -->
 <div class="sheet" id="detailSheet" hidden>
   <div class="sheet-card">
+    <div class="grabber"></div>
     <div class="sheet-head">
       <h2 id="dTitle">灵感</h2>
-      <button class="icon-btn" data-close="detailSheet">✕</button>
+      <button class="icon-btn bare" data-close="detailSheet" aria-label="关闭"><svg class="ico"><use href="#i-close"/></svg></button>
     </div>
     <div class="player">
-      <button class="play-btn" id="dPlay">▶️</button>
+      <button class="play-btn" id="dPlay" aria-label="播放"><svg class="ico"><use href="#i-play"/></svg></button>
       <input type="range" id="dSeek" min="0" max="100" value="0" step="0.1">
       <span class="time" id="dDur">00:00</span>
     </div>
@@ -84,12 +134,13 @@
 <!-- 新建项目 -->
 <div class="sheet" id="projectSheet" hidden>
   <div class="sheet-card">
+    <div class="grabber"></div>
     <div class="sheet-head">
       <h2>新建项目</h2>
-      <button class="icon-btn" data-close="projectSheet">✕</button>
+      <button class="icon-btn bare" data-close="projectSheet" aria-label="关闭"><svg class="ico"><use href="#i-close"/></svg></button>
     </div>
     <input type="text" id="pName" class="field" placeholder="项目名称，例如「新 App 点子」" autocomplete="off">
-    <div class="emoji-row" id="pEmoji"></div>
+    <div class="pick-row" id="pEmoji"></div>
     <button class="solid-btn wide" id="pCreate">创建项目</button>
   </div>
 </div>
@@ -97,9 +148,10 @@
 <!-- 移动到项目 -->
 <div class="sheet" id="moveSheet" hidden>
   <div class="sheet-card">
+    <div class="grabber"></div>
     <div class="sheet-head">
       <h2>归档到项目</h2>
-      <button class="icon-btn" data-close="moveSheet">✕</button>
+      <button class="icon-btn bare" data-close="moveSheet" aria-label="关闭"><svg class="ico"><use href="#i-close"/></svg></button>
     </div>
     <div class="move-list" id="moveList"></div>
   </div>
@@ -108,20 +160,22 @@
 <!-- 备份与存储 -->
 <div class="sheet" id="dataSheet" hidden>
   <div class="sheet-card">
+    <div class="grabber"></div>
     <div class="sheet-head">
       <h2>备份与存储</h2>
-      <button class="icon-btn" data-close="dataSheet">✕</button>
+      <button class="icon-btn bare" data-close="dataSheet" aria-label="关闭"><svg class="ico"><use href="#i-close"/></svg></button>
     </div>
 
     <div class="stat-grid" id="statGrid"></div>
 
     <div class="warnbox" id="persistBox" hidden>
+      <svg class="ico"><use href="#i-warn"/></svg>
       <span id="persistText"></span>
       <button class="mini-btn" id="persistBtn" hidden>开启</button>
     </div>
 
-    <button class="solid-btn wide" id="bExport">导出备份</button>
-    <button class="ghost-btn wide" id="bImport">从备份导入</button>
+    <button class="solid-btn wide" id="bExport"><svg class="ico"><use href="#i-down"/></svg>导出备份</button>
+    <button class="ghost-btn wide" id="bImport"><svg class="ico"><use href="#i-up"/></svg>从备份导入</button>
     <input type="file" id="bFile" accept=".zip,.spark,application/zip" hidden>
 
     <p class="hint">

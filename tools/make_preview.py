@@ -23,8 +23,10 @@ def main():
     favicon = data_uri(os.path.join(WWW, 'assets', 'brand', 'spark-favicon.svg'), 'image/svg+xml')
     touch = data_uri(os.path.join(WWW, 'assets', 'brand', 'app-icon-180.png'), 'image/png')
     icon32 = data_uri(os.path.join(WWW, 'assets', 'brand', 'app-icon-32.png'), 'image/png')
+    wordmark = data_uri(os.path.join(WWW, 'fonts', 'playfair-wordmark.woff2'), 'font/woff2')
 
     css = css.replace('../assets/brand/spark-mark.svg', mark)
+    css = css.replace('../fonts/playfair-wordmark.woff2', wordmark)
     html = html.replace('<link rel="stylesheet" href="css/app.css">', f'<style>\n{css}\n</style>')
     html = html.replace('assets/brand/spark-favicon.svg', favicon)
     html = html.replace('assets/brand/app-icon-180.png', touch)
