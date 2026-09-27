@@ -1,18 +1,28 @@
 #!/usr/bin/env python3
-"""Generate Spark launcher icons and splash screens (run with the managed venv python)."""
-import math
+"""Generate Spark launcher icons and splash screens from the brand mark.
+
+Source art: assets/brand/png/spark-mark-1024.png (black mark, transparent)
+            assets/brand/png/spark-mark-white-1024.png (white mark, transparent)
+
+Usage: python3 tools/gen_icons.py [res-dir]
+"""
 import os
 import struct
 import sys
-from PIL import Image, ImageDraw, ImageFilter
+from PIL import Image
 
-RES = sys.argv[1] if len(sys.argv) > 1 else os.path.join(os.path.dirname(__file__), '..', 'android', 'app', 'src', 'main', 'res')
-RES = os.path.abspath(RES)
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
+RES = os.path.abspath(sys.argv[1] if len(sys.argv) > 1 else
+                      os.path.join(ROOT, 'android', 'app', 'src', 'main', 'res'))
 
-ORANGE_HI = (255, 214, 140)
-ORANGE_LO = (255, 90, 20)
-BG_HI = (32, 35, 46)
-BG_LO = (10, 11, 16)
+BRAND = os.path.join(ROOT, 'assets', 'brand', 'png')
+MARK_INK = os.path.join(BRAND, 'spark-mark-1024.png')
+MARK_WHITE = os.path.join(BRAND, 'spark-mark-white-1024.png')
+
+INK = (15, 17, 21, 255)
+PAPER = (255, 255, 255, 255)
+SPLASH_BG = (15, 17, 21, 255)
+SS = 4  # supersampling
 
 
 def png_size(path):
@@ -21,63 +31,65 @@ def png_size(path):
     return struct.unpack('>II', d[16:24])
 
 
-def gradient(size, c1, c2):
-    g = Image.new('RGB', (size, size))
-    d = ImageDraw.Draw(g)
-    for y in range(size):
-        t = y / max(1, size - 1)
-        d.line([(0, y), (size, y)], fill=tuple(int(c1[i] + (c2[i] - c1[i]) * t) for i in range(3)))
-    return g.convert('RGBA')
+def load(path, color):
+    """Load the mark and re-tint it to `color` (source art is flat monochrome)."""
+    img = Image.open(path).convert('RGBA')
+    bbox = img.getchannel('A').getbbox()
+    if bbox:
+        img = img.crop(bbox)
+    out = Image.new('RGBA', img.size, color)
+    out.putalpha(img.getchannel('A'))
+    return out
 
 
-def star_points(cx, cy, r_out, r_in, n=4, rot=-math.pi / 2):
-    pts = []
-    for i in range(n * 2):
-        r = r_out if i % 2 == 0 else r_in
-        a = rot + i * math.pi / n
-        pts.append((cx + r * math.cos(a), cy + r * math.sin(a)))
-    return pts
+def place_mark(canvas, mark, target_h, center, color):
+    """Scale the mark to target_h and composite it centred on `canvas`."""
+    m = load(mark, color)
+    h = max(1, int(target_h))
+    w = max(1, round(m.width * h / m.height))
+    m = m.resize((w, h), Image.LANCZOS)
+    canvas.alpha_composite(m, (int(center[0] - w / 2), int(center[1] - h / 2)))
+    return canvas
 
 
-def compose(size, mode):
-    """mode: legacy | round | adaptive | splash"""
-    SS = 4
+def rounded_mask(size, radius):
+    m = Image.new('L', (size, size), 0)
+    from PIL import ImageDraw
+    ImageDraw.Draw(m).rounded_rectangle([0, 0, size - 1, size - 1], radius=radius, fill=255)
+    return m
+
+
+def circle_mask(size):
+    m = Image.new('L', (size, size), 0)
+    from PIL import ImageDraw
+    ImageDraw.Draw(m).ellipse([0, 0, size - 1, size - 1], fill=255)
+    return m
+
+
+def legacy_icon(size, shape):
     S = size * SS
-    w, h = (S, S) if mode != 'splash' else (size * SS, size * SS)
-    canvas = Image.new('RGBA', (w, h), (0, 0, 0, 0))
+    canvas = Image.new('RGBA', (S, S), (0, 0, 0, 0))
+    plate = Image.new('RGBA', (S, S), PAPER)
+    canvas.alpha_composite(plate)
+    place_mark(canvas, MARK_INK, S * 0.66, (S / 2, S / 2), INK)
+    mask = circle_mask(S) if shape == 'round' else rounded_mask(S, int(S * 0.22))
+    canvas.putalpha(mask)
+    return canvas.resize((size, size), Image.LANCZOS)
 
-    if mode in ('legacy', 'round', 'splash'):
-        bg = gradient(S, BG_HI, BG_LO)
-        rad = Image.new('L', (S, S), 0)
-        ImageDraw.Draw(rad).ellipse([S * 0.02, S * 0.02, S * 0.98, S * 0.98], fill=110)
-        rad = rad.filter(ImageFilter.GaussianBlur(S * 0.13))
-        glow = Image.new('RGBA', (S, S), (255, 122, 24, 90))
-        canvas = Image.alpha_composite(canvas, Image.composite(glow, Image.new('RGBA', (S, S), (0, 0, 0, 0)), rad))
-        canvas = Image.alpha_composite(canvas, bg.point(lambda v: v) if False else bg)
 
-    cx, cy = w / 2, h / 2
-    frac = 0.30 if mode in ('legacy', 'round') else (0.23 if mode == 'adaptive' else 0.16)
-    r_out = min(w, h) * frac
-    r_in = r_out * 0.33
+def adaptive_foreground(size):
+    """108dp canvas; the mark stays inside the 66dp guaranteed-visible circle."""
+    S = size * SS
+    canvas = Image.new('RGBA', (S, S), (0, 0, 0, 0))
+    place_mark(canvas, MARK_INK, S * 0.50, (S / 2, S / 2), INK)
+    return canvas.resize((size, size), Image.LANCZOS)
 
-    mask = Image.new('L', (w, h), 0)
-    ImageDraw.Draw(mask).polygon(star_points(cx, cy, r_out, r_in), fill=255)
 
-    glow = mask.filter(ImageFilter.GaussianBlur(min(w, h) * 0.045))
-    glow_layer = Image.new('RGBA', (w, h), (255, 138, 40, 255))
-    glow_layer.putalpha(glow.point(lambda v: int(v * 0.8)))
-    canvas = Image.alpha_composite(canvas, glow_layer)
-
-    star = Image.new('RGBA', (w, h), (0, 0, 0, 0))
-    star.paste(gradient(S, ORANGE_HI, ORANGE_LO).resize((w, h)), (0, 0), mask)
-    canvas = Image.alpha_composite(canvas, star)
-
-    if mode == 'round':
-        am = Image.new('L', (S, S), 0)
-        ImageDraw.Draw(am).ellipse([0, 0, S - 1, S - 1], fill=255)
-        canvas.putalpha(Image.composite(Image.new('L', (S, S), 255), Image.new('L', (S, S), 0), am))
-
-    return canvas.resize((size, size) if mode != 'splash' else (size, size), Image.LANCZOS)
+def splash(w, h):
+    S_W, S_H = w * SS, h * SS
+    canvas = Image.new('RGBA', (S_W, S_H), SPLASH_BG)
+    place_mark(canvas, MARK_WHITE, min(S_W, S_H) * 0.26, (S_W / 2, S_H / 2), PAPER)
+    return canvas.resize((w, h), Image.LANCZOS).convert('RGB')
 
 
 def main():
@@ -85,27 +97,20 @@ def main():
     adaptive = {'mdpi': 108, 'hdpi': 162, 'xhdpi': 216, 'xxhdpi': 324, 'xxxhdpi': 432}
 
     for dpi, size in legacy.items():
-        compose(size, 'legacy').save(os.path.join(RES, 'mipmap-' + dpi, 'ic_launcher.png'))
-        compose(size, 'round').save(os.path.join(RES, 'mipmap-' + dpi, 'ic_launcher_round.png'))
+        legacy_icon(size, 'square').save(os.path.join(RES, 'mipmap-' + dpi, 'ic_launcher.png'))
+        legacy_icon(size, 'round').save(os.path.join(RES, 'mipmap-' + dpi, 'ic_launcher_round.png'))
     for dpi, size in adaptive.items():
-        compose(size, 'adaptive').save(os.path.join(RES, 'mipmap-' + dpi, 'ic_launcher_foreground.png'))
+        adaptive_foreground(size).save(
+            os.path.join(RES, 'mipmap-' + dpi, 'ic_launcher_foreground.png'))
     print('icons written')
 
-    # splash: keep existing dimensions
-    for name in ('splash.png',):
-        for dpi in ('mdpi', 'hdpi', 'xhdpi', 'xxhdpi', 'xxxhdpi'):
-            for sub in ('drawable', 'drawable-port-' + dpi, 'drawable-land-' + dpi):
-                p = os.path.join(RES, sub, name)
-                if not os.path.isfile(p):
-                    continue
-                w, h = png_size(p)
-                img = Image.new('RGBA', (w, h), (0, 0, 0, 255))
-                bg = gradient(max(w, h), BG_HI, BG_LO).resize((w, h))
-                img = Image.alpha_composite(img, bg)
-                glyph_size = int(min(w, h) * 0.9)
-                g = compose(glyph_size, 'adaptive')
-                img.alpha_composite(g, ((w - glyph_size) // 2, (h - glyph_size) // 2))
-                img.convert('RGB').save(p)
+    for dpi in ('mdpi', 'hdpi', 'xhdpi', 'xxhdpi', 'xxxhdpi'):
+        for sub in ('drawable', 'drawable-port-' + dpi, 'drawable-land-' + dpi):
+            p = os.path.join(RES, sub, 'splash.png')
+            if not os.path.isfile(p):
+                continue
+            w, h = png_size(p)
+            splash(w, h).save(p)
     print('splash written')
 
 
