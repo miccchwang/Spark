@@ -7,6 +7,15 @@
 --
 -- The app talks to this over plain REST with the anon key, so RLS is the only thing
 -- standing between users. Do not disable it.
+--
+-- Two conventions worth knowing before editing:
+--   * Every user-owned column references public.profiles(id), never auth.users(id)
+--     directly. PostgREST can only follow foreign keys it can see, and the client asks
+--     for embedded rows like `contact:contact_id(email,display_name)`. Pointing at
+--     auth.users would make those embeds fail. profiles.id cascades from auth.users, so
+--     deleting an account still cleans everything up.
+--   * A "share" is its own row, not the idea itself. That is what lets the same idea go
+--     to two different groups and have two independent discussions.
 
 create extension if not exists "pgcrypto";
 
@@ -45,8 +54,8 @@ create trigger on_auth_user_created
 -- grants no access to anything until you share something with them.
 create table if not exists public.contacts (
   id         uuid primary key default gen_random_uuid(),
-  owner_id   uuid not null references auth.users on delete cascade,
-  contact_id uuid not null references auth.users on delete cascade,
+  owner_id   uuid not null references public.profiles(id) on delete cascade,
+  contact_id uuid not null references public.profiles(id) on delete cascade,
   alias      text,
   created_at timestamptz not null default now(),
   unique (owner_id, contact_id),
@@ -72,13 +81,13 @@ $$;
 create table if not exists public.groups (
   id         uuid primary key default gen_random_uuid(),
   name       text not null check (length(trim(name)) > 0),
-  owner_id   uuid not null references auth.users on delete cascade,
+  owner_id   uuid not null references public.profiles(id) on delete cascade,
   created_at timestamptz not null default now()
 );
 
 create table if not exists public.group_members (
   group_id  uuid not null references public.groups on delete cascade,
-  member_id uuid not null references auth.users on delete cascade,
+  member_id uuid not null references public.profiles(id) on delete cascade,
   role      text not null default 'member' check (role in ('owner', 'member')),
   joined_at timestamptz not null default now(),
   primary key (group_id, member_id)
@@ -141,10 +150,14 @@ $$;
 
 -- ---------------------------------------------------------------- shared ideas
 
+-- One row per (idea, group). The row id — not the local idea id — is what the discussion
+-- hangs off, so the same idea can live in two groups with two separate threads.
+-- Nothing here carries the audio; only text leaves the device.
 create table if not exists public.shared_ideas (
-  id          uuid primary key,
+  id          uuid primary key default gen_random_uuid(),
+  source_id   uuid not null,
   group_id    uuid not null references public.groups on delete cascade,
-  author_id   uuid not null references auth.users on delete cascade,
+  author_id   uuid not null references public.profiles(id) on delete cascade,
   title       text,
   note        text,
   keywords    text[] default '{}',
@@ -153,7 +166,8 @@ create table if not exists public.shared_ideas (
   lat         double precision,
   lon         double precision,
   shared_at   timestamptz not null default now(),
-  updated_at  timestamptz not null default now()
+  updated_at  timestamptz not null default now(),
+  unique (source_id, group_id)
 );
 
 create index if not exists shared_ideas_group_idx on public.shared_ideas (group_id, shared_at desc);
@@ -162,9 +176,9 @@ create index if not exists shared_ideas_group_idx on public.shared_ideas (group_
 
 create table if not exists public.messages (
   id         uuid primary key default gen_random_uuid(),
-  idea_id    uuid not null references public.shared_ideas on delete cascade,
+  share_id   uuid not null references public.shared_ideas on delete cascade,
   group_id   uuid not null references public.groups on delete cascade,
-  author_id  uuid not null references auth.users on delete cascade,
+  author_id  uuid not null references public.profiles(id) on delete cascade,
   body       text not null,
   -- 'text' is free discussion, 'command' is a slash command that already took effect.
   kind       text not null default 'text' check (kind in ('text', 'command')),
@@ -173,18 +187,18 @@ create table if not exists public.messages (
   created_at timestamptz not null default now()
 );
 
-create index if not exists messages_idea_idx on public.messages (idea_id, created_at);
+create index if not exists messages_share_idx on public.messages (share_id, created_at);
 
 create table if not exists public.shared_todos (
   id          uuid primary key default gen_random_uuid(),
-  idea_id     uuid references public.shared_ideas on delete cascade,
+  share_id    uuid references public.shared_ideas on delete cascade,
   group_id    uuid not null references public.groups on delete cascade,
   text        text not null,
   due         text,
   done        boolean not null default false,
   done_at     timestamptz,
-  assignee_id uuid references auth.users on delete set null,
-  created_by  uuid not null references auth.users on delete cascade,
+  assignee_id uuid references public.profiles(id) on delete set null,
+  created_by  uuid not null references public.profiles(id) on delete cascade,
   created_at  timestamptz not null default now()
 );
 
@@ -272,7 +286,7 @@ drop policy if exists messages_remove on public.messages;
 create policy messages_remove on public.messages for delete
   using (author_id = auth.uid());
 
--- shared todos: members read and create; the creator or the assignee may tick one off.
+-- shared todos: members read and create; any member may tick one off.
 drop policy if exists shared_todos_read on public.shared_todos;
 create policy shared_todos_read on public.shared_todos for select
   using (public.is_member(group_id));

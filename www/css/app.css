@@ -681,6 +681,30 @@ body {
 }
 .action-due .ico { width: 13px; height: 13px; }
 
+/* ---------- segmented control ---------- */
+.seg {
+  display: flex; gap: 0;
+  /* overflow:hidden clips the rounded corners, which also makes this item's automatic
+     minimum size resolve to 0 — so inside a tall scrolling sheet the flex column would
+     happily squash it away. flex:none pins it to its content height. */
+  flex: none;
+  border: var(--line) solid var(--ink);
+  border-radius: var(--r-md);
+  overflow: hidden;
+}
+.seg button {
+  flex: 1;
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  padding: 12px 10px;
+  border: none;
+  background: var(--paper); color: var(--ink);
+  font-size: 14px; font-weight: 700; font-family: inherit;
+  cursor: pointer;
+}
+.seg button + button { border-left: var(--line) solid var(--ink); }
+.seg button .ico { width: 17px; height: 17px; }
+.seg button.on { background: var(--ink); color: var(--paper); }
+
 /* ---------- toast ---------- */
 .toast {
   position: fixed; left: 50%; bottom: calc(116px + var(--safe-bottom));
@@ -694,5 +718,252 @@ body {
   z-index: 200;
   animation: fade .16s ease;
 }
+
+/* ============================================================
+   Online edition — people, groups and the discussion area.
+   Still two colours. The only new devices are the outlined
+   speech box, the solid bubble for your own messages, and the
+   pinned strip above a thread.
+   ============================================================ */
+
+/* ---------- list sections ---------- */
+.section-head { display: flex; align-items: center; gap: 9px; margin: 8px 0 0; }
+.section-head:first-child { margin-top: 0; }
+.section-label {
+  font-size: 9.5px; font-weight: 800;
+  letter-spacing: .16em; text-transform: uppercase;
+  opacity: .6;
+}
+.section-count {
+  font-size: 9.5px; font-weight: 800;
+  letter-spacing: .1em;
+  font-variant-numeric: tabular-nums;
+  padding: 1px 7px;
+  border: var(--line) solid var(--ink);
+  border-radius: 999px;
+}
+.section-head .mini-btn { margin-left: auto; flex: none; }
+
+/* The sheet card's own gap only reaches its direct children, so nested blocks that hold
+   several rows need to re-establish it. */
+#onlineBox, #authBox, #authForm, #grNameWrap {
+  display: flex; flex-direction: column; gap: 12px;
+}
+
+.section-hint {
+  margin: 0;
+  padding: 13px;
+  border: var(--line) dashed var(--ink);
+  border-radius: var(--r-md);
+  font-size: 12.5px; line-height: 1.7;
+  opacity: .7;
+}
+.todo-group .section-head { margin: 0; }
+
+.empty-title { display: block; font-size: 14.5px; font-weight: 700; opacity: 1; }
+.empty-sub { display: block; margin-top: 7px; }
+.empty .solid-btn { margin-top: 16px; flex: none; }
+
+/* ---------- people & group rows ---------- */
+.prow {
+  display: flex; align-items: center; gap: 12px;
+  width: 100%;
+  padding: 12px 13px;
+  border: var(--line) solid var(--ink);
+  border-radius: var(--r-md);
+  background: var(--paper); color: var(--ink);
+  font-family: inherit; text-align: left;
+}
+.prow.go { cursor: pointer; transition: background .12s ease, color .12s ease; }
+.prow.go:active { background: var(--ink); color: var(--paper); }
+.prow-ico { flex: none; opacity: .75; }
+.prow-ico .ico { width: 22px; height: 22px; stroke-width: 1.6; }
+.prow-body { flex: 1; min-width: 0; }
+.prow-name {
+  margin: 0;
+  font-size: 14.5px; font-weight: 700;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.prow-sub {
+  margin: 3px 0 0;
+  font-size: 11.5px; opacity: .62;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.prow-go { flex: none; opacity: .5; }
+.prow-go .ico { width: 18px; height: 18px; }
+.prow .mini-btn { flex: none; }
+.mini-btn.danger { border-style: dashed; }
+
+/* a plain stacking list inside a sheet, so rows need their own spacing */
+.people-list { display: flex; flex-direction: column; }
+.people-list .prow, .people-list .pick-item { margin-top: 9px; }
+.people-list > :first-child { margin-top: 0; }
+
+/* ---------- pick lists ---------- */
+.pick-item {
+  display: flex; align-items: center; gap: 10px;
+  width: 100%;
+  padding: 11px 13px;
+  border: var(--line) solid var(--ink);
+  border-radius: var(--r-md);
+  background: var(--paper); color: var(--ink);
+  font-family: inherit; font-size: 13.5px; text-align: left;
+  cursor: pointer;
+}
+.pick-item.on { background: var(--ink); color: var(--paper); }
+.pick-item:active { transform: translateY(1px); }
+.pick-item input { flex: none; width: 17px; height: 17px; accent-color: var(--ink); }
+.pick-item .pick-name { font-weight: 700; }
+.pick-item .pick-sub { margin-left: auto; font-size: 11px; opacity: .65; }
+
+/* ---------- one group ---------- */
+.group-bar { display: flex; gap: 10px; }
+.group-bar .solid-btn, .group-bar .ghost-btn { flex: 1; }
+
+.card.shared { display: flex; align-items: center; gap: 10px; cursor: pointer; }
+.card.shared .card-body { flex: 1; min-width: 0; }
+.card-go { flex: none; opacity: .5; }
+.card-go .ico { width: 18px; height: 18px; }
+
+/* ---------- pinned conclusions ---------- */
+.pinbox { display: flex; flex-direction: column; gap: 7px; }
+.pin {
+  display: flex; align-items: flex-start; gap: 9px;
+  padding: 10px 12px;
+  border-radius: var(--r-md);
+  background: var(--ink); color: var(--paper);
+  font-size: 12.5px; line-height: 1.6;
+}
+.pin .ico { flex: none; width: 16px; height: 16px; margin-top: 2px; }
+.pin span { min-width: 0; word-break: break-word; }
+
+/* ---------- discussion thread ---------- */
+#threadSheet .sheet-card {
+  height: 88vh;
+  overflow: hidden;          /* the thread scrolls, the composer stays put */
+}
+#threadSheet .hint, #threadSheet .pinbox, #threadSheet .todo-group { flex: none; }
+/* The action list is a pinned summary, so it must never crowd out the discussion —
+   and it can be folded away entirely when it still does. */
+#threadSheet .todo-group { max-height: 26vh; overflow-y: auto; }
+
+.thread {
+  flex: 1; min-height: 0;
+  overflow-y: auto;
+  display: flex; flex-direction: column; gap: 13px;
+}
+.msg {
+  display: flex; flex-direction: column; gap: 5px;
+  max-width: 88%;
+  align-self: flex-start;
+}
+.msg.mine { align-self: flex-end; }
+.msg-head {
+  font-size: 9.5px; font-weight: 750;
+  letter-spacing: .08em; text-transform: uppercase;
+  opacity: .55;
+}
+.msg.mine .msg-head { text-align: right; }
+.msg-body {
+  padding: 11px 13px;
+  border: var(--line) solid var(--ink);
+  border-radius: var(--r-md);
+  background: var(--paper); color: var(--ink);
+  font-size: 13.5px; line-height: 1.65;
+  white-space: pre-wrap; word-break: break-word;
+}
+.msg.mine .msg-body { background: var(--ink); color: var(--paper); }
+
+/* a command reads as structure, not as speech */
+.msg.cmd { width: 100%; max-width: 100%; }
+.msg.cmd .msg-body { border-style: dashed; background: var(--paper); color: var(--ink); }
+.cmd-name {
+  margin-bottom: 8px;
+  font-size: 9.5px; font-weight: 800;
+  letter-spacing: .14em; text-transform: uppercase;
+  opacity: .55;
+}
+.cmd-out {
+  display: flex; flex-direction: column; gap: 9px;
+  font-size: 13.5px; line-height: 1.65;
+}
+.cmd-out.kw-row { flex-direction: row; flex-wrap: wrap; }
+.cmd-todo { display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap; }
+.cmd-todo .tick { width: 21px; height: 21px; }
+.cmd-todo .tick:disabled { opacity: .4; cursor: default; }
+.cmd-todo > span:not(.kw) { flex: 1; min-width: 0; font-weight: 600; }
+.cmd-help {
+  display: flex; flex-direction: column; gap: 3px;
+  padding-bottom: 7px;
+  border-bottom: var(--line) dashed var(--ink);
+}
+.cmd-help:last-child { border-bottom: none; padding-bottom: 0; }
+.cmd-help code {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 12.5px; font-weight: 700;
+}
+.cmd-help span { font-size: 11.5px; opacity: .68; }
+
+/* ---------- composer ---------- */
+.composer {
+  position: relative;      /* anchors the floating command palette */
+  flex: none;
+  display: flex; flex-direction: column; gap: 8px;
+  margin-top: 2px; padding-top: 11px;
+  border-top: var(--line) solid var(--ink);
+}
+/* Floated rather than laid out, so opening it can never push the input off screen. */
+.cmd-palette {
+  position: absolute;
+  left: 0; right: 0; bottom: calc(100% + 8px);
+  z-index: 5;
+  display: flex; flex-direction: column; gap: 6px;
+  max-height: 46vh; overflow-y: auto;
+  padding: 7px;
+  background: var(--paper);
+  border: var(--line) solid var(--ink);
+  border-radius: var(--r-md);
+}
+.pal-row {
+  display: flex; flex-direction: column; gap: 2px;
+  width: 100%; text-align: left;
+  padding: 9px 11px;
+  border: var(--line) solid var(--ink);
+  border-radius: var(--r-sm);
+  background: var(--paper); color: var(--ink);
+  font-family: inherit; cursor: pointer;
+}
+.pal-row.on { background: var(--ink); color: var(--paper); }
+.pal-row code {
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 12.5px; font-weight: 700;
+}
+.pal-row span { font-size: 11px; opacity: .68; }
+.cmd-hint { margin: 0; font-size: 11.5px; font-weight: 650; opacity: .72; }
+.cmd-hint.bad { padding-left: 9px; border-left: 3px solid var(--ink); opacity: .9; }
+.composer-row { display: flex; align-items: flex-end; gap: 8px; }
+.composer-row .field {
+  flex: 1; min-width: 0;
+  max-height: 120px; overflow-y: auto;
+  resize: none; line-height: 1.5;
+}
+.cmd-key, .send-btn {
+  flex: none;
+  width: 42px; height: 42px;
+  display: grid; place-items: center;
+  border: var(--line) solid var(--ink);
+  border-radius: var(--r-md);
+  cursor: pointer; padding: 0;
+}
+.cmd-key {
+  background: var(--paper); color: var(--ink);
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 17px; font-weight: 700;
+}
+.cmd-key:active { background: var(--ink); color: var(--paper); }
+.send-btn { background: var(--ink); color: var(--paper); }
+.send-btn .ico { width: 19px; height: 19px; }
+.send-btn:active { background: var(--paper); color: var(--ink); }
+.send-btn:disabled { opacity: .45; }
 
 [hidden] { display: none !important; }

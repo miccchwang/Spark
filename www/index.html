@@ -60,6 +60,9 @@
   <symbol id="i-bowl" viewBox="0 0 24 24"><path d="M3.7 10.6h16.6a8.3 8.3 0 0 1-8.3 8.3 8.3 8.3 0 0 1-8.3-8.3Z"/><path d="M8.5 7.4c0-1.6 1.5-1.6 1.5-3.2M12 7.4c0-1.6 1.5-1.6 1.5-3.2M15.5 7.4c0-1.6 1.5-1.6 1.5-3.2"/></symbol>
   <symbol id="i-plane" viewBox="0 0 24 24"><path d="M20.6 3.4 3.5 10.6l6.3 2.4 2.4 6.3 8.4-15.9Z"/><path d="M20.6 3.4 9.8 13"/></symbol>
   <symbol id="i-flask" viewBox="0 0 24 24"><path d="M9.4 3.4v6L4.9 17.6a2 2 0 0 0 1.7 3h10.8a2 2 0 0 0 1.7-3L14.6 9.4v-6"/><path d="M8.2 3.4h7.6M7.4 14.4h9.2"/></symbol>
+  <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9.4" cy="8.3" r="3.5"/><path d="M3.3 19.6c0-3.4 2.7-5.5 6.1-5.5s6.1 2.1 6.1 5.5"/><path d="M16.3 5.4a3.5 3.5 0 0 1 0 6.8M17.6 14.3c1.9.8 3.1 2.5 3.1 5.3"/></symbol>
+  <symbol id="i-go" viewBox="0 0 24 24"><path d="M9.6 5.4 16.2 12l-6.6 6.6"/></symbol>
+  <symbol id="i-send" viewBox="0 0 24 24"><path d="M4.2 11.6 20.2 4.2 12.8 20.2l-2.1-6.5-6.5-2.1Z"/><path d="M20.2 4.2 10.7 13.7"/></symbol>
 </svg>
 
 <header class="topbar">
@@ -224,15 +227,129 @@
   </div>
 </div>
 
-<!-- 备份与存储 -->
+<!-- 讨论区：围绕一条被分享到群里的灵感 -->
+<div class="sheet" id="threadSheet" hidden>
+  <div class="sheet-card">
+    <div class="grabber"></div>
+    <div class="sheet-head">
+      <h2 id="tTitle">讨论</h2>
+      <button class="icon-btn bare" data-close="threadSheet" aria-label="关闭"><svg class="ico"><use href="#i-close"/></svg></button>
+    </div>
+    <p class="hint" id="tMeta"></p>
+    <div class="pinbox" id="tPins" hidden></div>
+    <div class="thread" id="tMessages"></div>
+    <div class="todo-group" id="tTodos" hidden></div>
+    <div class="composer">
+      <div class="cmd-palette" id="tPalette" hidden></div>
+      <p class="cmd-hint" id="tHint" hidden></p>
+      <div class="composer-row">
+        <button class="cmd-key" id="tCmd" aria-label="命令">/</button>
+        <textarea id="tInput" class="field" rows="1" placeholder="说点什么，或输入 / 用命令" autocomplete="off"></textarea>
+        <button class="send-btn" id="tSend" aria-label="发送"><svg class="ico"><use href="#i-send"/></svg></button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- 通讯人 -->
+<div class="sheet" id="peopleSheet" hidden>
+  <div class="sheet-card">
+    <div class="grabber"></div>
+    <div class="sheet-head">
+      <h2>通讯人</h2>
+      <button class="icon-btn bare" data-close="peopleSheet" aria-label="关闭"><svg class="ico"><use href="#i-close"/></svg></button>
+    </div>
+    <input type="email" id="cEmail" class="field" placeholder="对方的注册邮箱" autocomplete="off" spellcheck="false">
+    <input type="text" id="cAlias" class="field" placeholder="备注名（可选）" autocomplete="off">
+    <button class="solid-btn wide" id="cAdd">添加</button>
+    <div class="people-list" id="cList"></div>
+    <p class="hint">对方需要先在这个后端上注册过账号。添加只是把你自己的通讯录记下来，不会给对方任何权限。</p>
+  </div>
+</div>
+
+<!-- 新建群组 / 添加成员 -->
+<div class="sheet" id="groupSheet" hidden>
+  <div class="sheet-card">
+    <div class="grabber"></div>
+    <div class="sheet-head">
+      <h2 id="grTitle">新建群组</h2>
+      <button class="icon-btn bare" data-close="groupSheet" aria-label="关闭"><svg class="ico"><use href="#i-close"/></svg></button>
+    </div>
+    <div id="grNameWrap">
+      <input type="text" id="grName" class="field" placeholder="群组名称，例如「新 App 点子」" autocomplete="off">
+    </div>
+    <div class="pick-label">从通讯人里选</div>
+    <div class="people-list" id="grPick"></div>
+    <button class="solid-btn wide" id="grCreate">创建群组</button>
+    <p class="hint" id="grHint"></p>
+  </div>
+</div>
+
+<!-- 分享灵感到群组 -->
+<div class="sheet" id="shareSheet" hidden>
+  <div class="sheet-card">
+    <div class="grabber"></div>
+    <div class="sheet-head">
+      <h2>分享到群组</h2>
+      <button class="icon-btn bare" data-close="shareSheet" aria-label="关闭"><svg class="ico"><use href="#i-close"/></svg></button>
+    </div>
+    <p class="hint" id="shIdea"></p>
+    <div class="pick-label">选一条灵感</div>
+    <div class="people-list" id="shIdeas"></div>
+    <div class="pick-label">发到哪个群</div>
+    <div class="people-list" id="shGroups"></div>
+    <button class="solid-btn wide" id="shGo">分享</button>
+  </div>
+</div>
+
+<!-- 设置：运行模式、在线后端、备份 -->
 <div class="sheet" id="dataSheet" hidden>
   <div class="sheet-card">
     <div class="grabber"></div>
     <div class="sheet-head">
-      <h2>备份与存储</h2>
+      <h2>设置</h2>
       <button class="icon-btn bare" data-close="dataSheet" aria-label="关闭"><svg class="ico"><use href="#i-close"/></svg></button>
     </div>
 
+    <div class="pick-label">运行模式</div>
+    <div class="seg" id="modeSeg">
+      <button data-mode="local"><svg class="ico"><use href="#i-tray"/></svg><span>本地</span></button>
+      <button data-mode="online"><svg class="ico"><use href="#i-plane"/></svg><span>在线</span></button>
+    </div>
+    <p class="hint" id="modeHint"></p>
+
+    <div id="onlineBox" hidden>
+      <div class="pick-label">后端地址</div>
+      <input type="url" id="apiUrl" class="field" placeholder="https://你的项目.supabase.co" autocomplete="off" spellcheck="false">
+      <div class="pick-label">Anon key</div>
+      <input type="text" id="apiKey" class="field" placeholder="eyJhbGciOiJIUzI1NiIs…" autocomplete="off" spellcheck="false">
+      <button class="ghost-btn wide" id="apiSave">保存并连接</button>
+      <p class="hint" id="apiState"></p>
+
+      <div id="authBox" hidden>
+        <div id="authForm">
+          <div class="pick-label">账号</div>
+          <input type="email" id="authEmail" class="field" placeholder="邮箱" autocomplete="off">
+          <input type="password" id="authPass" class="field" placeholder="密码（至少 6 位）" autocomplete="off">
+          <div class="sheet-actions" id="authActions">
+            <button class="ghost-btn" id="authSignIn">登录</button>
+            <button class="solid-btn" id="authSignUp">注册</button>
+          </div>
+        </div>
+        <div class="warnbox ok" id="authWho" hidden>
+          <svg class="ico"><use href="#i-check"/></svg>
+          <span id="authWhoText"></span>
+          <button class="mini-btn" id="authOut">退出</button>
+        </div>
+      </div>
+      <p class="hint">
+        后端只需要一个 Supabase 项目。把 <b>supabase/schema.sql</b> 在项目的 SQL 编辑器里跑一次，
+        建好表、群组和权限规则，再把项目地址和 anon key 填在上面。
+        anon key 是公开的，数据由行级安全策略保护。
+      </p>
+    </div>
+
+    <div class="pick-label">备份与存储</div>
     <div class="stat-grid" id="statGrid"></div>
 
     <div class="warnbox" id="persistBox" hidden>
@@ -255,11 +372,13 @@
 <div class="toast" id="toast" hidden></div>
 
 <script src="js/db.js"></script>
+<script src="js/api.js"></script>
 <script src="js/zip.js"></script>
 <script src="js/backup.js"></script>
 <script src="js/recorder.js"></script>
 <script src="js/speech.js"></script>
 <script src="js/summarize.js"></script>
+<script src="js/commands.js"></script>
 <script src="js/dnd.js"></script>
 <script src="js/app.js"></script>
 </body>

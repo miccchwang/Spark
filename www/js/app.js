@@ -4,7 +4,7 @@
     projects: [],
     ideas: [],
     todos: [],
-    view: 'inbox',        // 'inbox' | 'todos' | project id
+    view: 'inbox',        // 'inbox' | 'todos' | 'people' | 'group:<id>' | project id
     query: '',
     theme: 'dark',
     audioEl: null,
@@ -15,6 +15,15 @@
     pending: null,        // a finished recording waiting for its topic, not yet persisted
     speech: null,         // result of the offline recogniser probe
     distill: null,        // the payload currently shown in the distill sheet
+    mode: 'local',        // 'local' keeps everything on device; 'online' adds the backend
+    contacts: [],
+    groups: [],
+    groupData: {},        // gid -> { ideas, todos, members }, filled lazily per group
+    thread: null,         // the discussion currently open: { idea, group, messages, todos, members }
+    threadTodosOpen: true,// whether the thread's action list is unfolded
+    shareIdea: null,      // the local idea waiting to be sent to a group
+    groupEdit: null,      // null = creating, a group = adding members to it
+    cmdPick: 0,           // highlighted row in the command palette
   };
 
   const $ = (s) => document.querySelector(s);
@@ -110,6 +119,23 @@
       distillBtn.hidden = true;
       return;
     }
+    if (S.view === 'people') {
+      $('#viewTitle').textContent = '社群';
+      $('#viewSub').textContent = S.contacts.length + ' 位通讯人 · ' + S.groups.length + ' 个群组';
+      $('#recMeta').textContent = '录音照旧存在本机；分享是把某一条灵感单独发到群里';
+      distillBtn.hidden = true;
+      return;
+    }
+    if (S.view.indexOf('group:') === 0) {
+      const g = findGroup(S.view.slice(6));
+      const d = S.groupData[S.view.slice(6)] || {};
+      $('#viewTitle').textContent = (g && g.name) || '群组';
+      $('#viewSub').textContent = ((d.ideas || []).length) + ' 条分享 · ' +
+        ((d.members || []).length) + ' 位成员';
+      $('#recMeta').textContent = '点开一条分享，可以在讨论区用 / 命令直接生成待办或摘要';
+      distillBtn.hidden = true;
+      return;
+    }
     distillBtn.hidden = false;
 
     const isInbox = S.view === 'inbox';
@@ -137,6 +163,15 @@
     rail.innerHTML = '';
     rail.appendChild(makeChip({ drop: 'inbox', label: '收件箱', icon: 'tray', count: countIn(null), active: S.view === 'inbox' }));
     rail.appendChild(makeChip({ drop: 'todos', label: '待办', icon: 'check', count: openTodos().length, active: S.view === 'todos' }));
+    if (S.mode === 'online') {
+      rail.appendChild(makeChip({
+        drop: 'people',
+        label: '社群',
+        icon: 'plane',
+        count: S.groups.length,
+        active: S.view === 'people' || S.view.indexOf('group:') === 0,
+      }));
+    }
     S.projects.forEach((p) => {
       rail.appendChild(makeChip({ drop: p.id, label: p.name, icon: iconOf(p), count: countIn(p.id), active: S.view === p.id, project: p }));
     });
@@ -151,6 +186,8 @@
     const list = $('#ideaList');
     list.innerHTML = '';
     if (S.view === 'todos') { renderTodos(list); return; }
+    if (S.view === 'people') { renderPeople(list); return; }
+    if (S.view.indexOf('group:') === 0) { renderGroupView(list, S.view.slice(6)); return; }
 
     const items = visibleIdeas();
     if (!items.length) {
@@ -1009,6 +1046,1166 @@
     $('#distillSheet').hidden = false;
   }
 
+  /* ---------------- online: people, groups and the discussion area ----------------
+
+     The online edition is strictly additive. Everything above still works with the network
+     off; the only things that need a backend are sharing an idea into a group and the
+     discussion that hangs off it. A local idea stays local until you explicitly share it,
+     and even then only its text leaves the device — the recording never does. */
+
+  const meId = () => ((window.Api.currentUser() || {}).id || '');
+  const onlineReady = () =>
+    S.mode === 'online' && window.Api.isConfigured() && window.Api.isSignedIn();
+  const findGroup = (id) => S.groups.find((g) => g.id === id);
+
+  function personLabel(p) {
+    if (!p) return '未知';
+    return p.display_name || (p.email || '').split('@')[0] || p.email || '未知';
+  }
+
+  function authorName(m) {
+    if (m && m.author_id === meId()) return '我';
+    return personLabel(m && m.author);
+  }
+
+  /** Flatten the contacts rows into the plain { id, name, email } shape the UI wants. */
+  function contactRows() {
+    return S.contacts.map((c) => {
+      const p = c.contact || {};
+      return { id: p.id || c.contact_id, name: c.alias || personLabel(p), email: p.email || '' };
+    }).filter((r) => r.id);
+  }
+
+  /* --- small building blocks shared by the new views --- */
+
+  function sectionHead(label, count, actionLabel, onAction) {
+    const el = document.createElement('div');
+    el.className = 'section-head';
+    const h = document.createElement('span');
+    h.className = 'section-label';
+    h.textContent = label;
+    el.appendChild(h);
+    if (count != null && count !== '') {
+      const c = document.createElement('span');
+      c.className = 'section-count';
+      c.textContent = count;
+      el.appendChild(c);
+    }
+    if (actionLabel) {
+      const b = document.createElement('button');
+      b.className = 'mini-btn';
+      b.textContent = actionLabel;
+      b.addEventListener('click', onAction);
+      el.appendChild(b);
+    }
+    return el;
+  }
+
+  function sectionHint(text) {
+    const el = document.createElement('p');
+    el.className = 'section-hint';
+    el.textContent = text;
+    return el;
+  }
+
+  function loadingState(text) {
+    const el = document.createElement('div');
+    el.className = 'empty';
+    el.innerHTML = icon('clock', 'lg big') + '<span class="empty-title"></span>';
+    el.querySelector('.empty-title').textContent = text || '正在读取…';
+    return el;
+  }
+
+  function stateBlock(iconName, title, sub, btnLabel, onClick) {
+    const el = document.createElement('div');
+    el.className = 'empty';
+    el.innerHTML = icon(iconName, 'lg big') + '<span class="empty-title"></span><span class="empty-sub"></span>';
+    el.querySelector('.empty-title').textContent = title;
+    el.querySelector('.empty-sub').textContent = sub || '';
+    if (btnLabel) {
+      const b = document.createElement('button');
+      b.className = 'solid-btn';
+      b.textContent = btnLabel;
+      b.addEventListener('click', onClick);
+      el.appendChild(b);
+    }
+    return el;
+  }
+
+  const notReadyState = () => stateBlock('plane', '在线模式还没连接',
+    '到设置里填上后端地址并登录，就能添加通讯人和群组。', '打开设置', openDataSheet);
+
+  /* --- the 社群 list view --- */
+
+  function renderPeople(box) {
+    if (!onlineReady()) { box.appendChild(notReadyState()); return; }
+
+    const rows = contactRows();
+    box.appendChild(sectionHead('通讯人', rows.length, '添加', openPeopleSheet));
+    if (!rows.length) {
+      box.appendChild(sectionHint('还没有通讯人。填上对方的注册邮箱就能把他拉进群。'));
+    } else {
+      rows.forEach((r) => {
+        const el = document.createElement('div');
+        el.className = 'prow';
+        el.innerHTML = '<div class="prow-ico">' + icon('users') + '</div>' +
+          '<div class="prow-body"><p class="prow-name"></p><p class="prow-sub"></p></div>';
+        el.querySelector('.prow-name').textContent = r.name;
+        el.querySelector('.prow-sub').textContent = r.email;
+        box.appendChild(el);
+      });
+    }
+
+    box.appendChild(sectionHead('群组', S.groups.length, '新建', () => openGroupSheet(null)));
+    if (!S.groups.length) {
+      box.appendChild(sectionHint('还没有群组。建一个、把通讯人加进来，就可以分享灵感了。'));
+    } else {
+      S.groups.forEach((g) => box.appendChild(makeGroupRow(g)));
+    }
+  }
+
+  function makeGroupRow(g) {
+    const el = document.createElement('button');
+    el.type = 'button';
+    el.className = 'prow go';
+    el.innerHTML = '<div class="prow-ico">' + icon('case') + '</div>' +
+      '<div class="prow-body"><p class="prow-name"></p><p class="prow-sub"></p></div>' +
+      '<span class="prow-go">' + icon('go') + '</span>';
+    el.querySelector('.prow-name').textContent = g.name;
+    el.querySelector('.prow-sub').textContent = (g.owner_id === meId() ? '我创建的' : '我是成员') +
+      ' · ' + fmtWhen(new Date(g.created_at).getTime());
+    el.addEventListener('click', () => { S.view = 'group:' + g.id; render(); });
+    return el;
+  }
+
+  /* --- one group --- */
+
+  function ensureGroup(gid) {
+    if (S.groupData[gid]) return S.groupData[gid];
+    // Plant a placeholder first, so a re-entrant render shows a spinner instead of
+    // kicking off a second fetch for the same group.
+    S.groupData[gid] = { loading: true, ideas: [], members: [], todos: [] };
+    loadGroup(gid);
+    return S.groupData[gid];
+  }
+
+  async function loadGroup(gid) {
+    try {
+      const r = await Promise.all([
+        window.Api.groupIdeas(gid),
+        window.Api.groupMembers(gid),
+        window.Api.groupTodos(gid),
+      ]);
+      S.groupData[gid] = {
+        ideas: r[0] || [],
+        members: (r[1] || []).map((m) => ({
+          id: m.member_id,
+          role: m.role,
+          email: (m.profile || {}).email || '',
+          name: personLabel(m.profile),
+        })),
+        todos: r[2] || [],
+      };
+    } catch (e) {
+      S.groupData[gid] = { ideas: [], members: [], todos: [], error: (e && e.message) || '读取失败' };
+      toast('读取群组失败：' + ((e && e.message) || '未知错误'));
+    }
+    if (S.view === 'group:' + gid) render();
+  }
+
+  function refreshGroup(gid) { delete S.groupData[gid]; return loadGroup(gid); }
+
+  function renderGroupView(box, gid) {
+    if (!onlineReady()) { box.appendChild(notReadyState()); return; }
+    const g = findGroup(gid);
+    if (!g) {
+      box.appendChild(stateBlock('case', '找不到这个群组', '它可能已经被删除了。',
+        '返回社群', () => { S.view = 'people'; render(); }));
+      return;
+    }
+
+    const d = ensureGroup(gid);
+    if (d.loading) { box.appendChild(loadingState('正在读取群组…')); return; }
+    if (d.error) {
+      box.appendChild(stateBlock('warn', '读不到这个群组', d.error, '重试', () => refreshGroup(gid)));
+      return;
+    }
+
+    const bar = document.createElement('div');
+    bar.className = 'group-bar';
+    const shareBtn = document.createElement('button');
+    shareBtn.className = 'solid-btn';
+    shareBtn.innerHTML = icon('up') + '分享灵感';
+    shareBtn.addEventListener('click', () => openShareSheet(null, gid));
+    const memBtn = document.createElement('button');
+    memBtn.className = 'ghost-btn';
+    memBtn.innerHTML = icon('users') + '成员 ' + d.members.length;
+    memBtn.addEventListener('click', () => openGroupSheet(g));
+    bar.append(shareBtn, memBtn);
+    box.appendChild(bar);
+
+    if (d.todos.length) {
+      const open = d.todos.filter((t) => !t.done).length;
+      box.appendChild(sectionHead('群里的待办', open + ' / ' + d.todos.length, null, null));
+      d.todos.forEach((t) => box.appendChild(makeSharedTodoRow(t)));
+    }
+
+    box.appendChild(sectionHead('分享的想法', d.ideas.length, null, null));
+    if (!d.ideas.length) {
+      box.appendChild(sectionHint('还没有人往这个群分享灵感。点上面的按钮，把本机的一条发进来。'));
+    } else {
+      d.ideas.forEach((idea) => box.appendChild(makeSharedCard(idea)));
+    }
+  }
+
+  function makeSharedCard(idea) {
+    const el = document.createElement('div');
+    el.className = 'card shared';
+    el.innerHTML = '<div class="card-body"><p class="card-title"></p><div class="card-meta">' +
+      '<span class="m-when"></span><span class="m-kw"></span></div><p class="card-note"></p></div>' +
+      '<span class="card-go">' + icon('go') + '</span>';
+
+    const title = el.querySelector('.card-title');
+    title.textContent = idea.title || '未命名灵感';
+    if (!idea.title) title.classList.add('untitled');
+
+    el.querySelector('.m-when').innerHTML = icon('clock', 'sm') + '<span>' +
+      personLabel(idea.author) + ' · ' + fmtWhen(new Date(idea.shared_at).getTime()) + '</span>';
+
+    const kw = (idea.keywords || []).slice(0, 4);
+    el.querySelector('.m-kw').innerHTML = kw.length
+      ? icon('spark', 'sm') + '<span>' + kw.join(' · ') + '</span>' : '';
+
+    const note = el.querySelector('.card-note');
+    if (idea.note) note.textContent = idea.note; else note.remove();
+
+    el.addEventListener('click', () => openThread(idea));
+    return el;
+  }
+
+  function makeSharedTodoRow(t) {
+    const row = document.createElement('div');
+    row.className = 'todo' + (t.done ? ' done' : '');
+
+    const tick = document.createElement('button');
+    tick.className = 'tick' + (t.done ? ' on' : '');
+    tick.innerHTML = icon('check');
+    tick.setAttribute('aria-label', t.done ? '取消完成' : '标记完成');
+    tick.addEventListener('click', () => tickSharedTodo(t, false));
+
+    const body = document.createElement('div');
+    body.className = 'todo-body';
+    const txt = document.createElement('p');
+    txt.className = 'todo-text';
+    txt.textContent = t.text;
+    const meta = document.createElement('div');
+    meta.className = 'todo-meta';
+    const bits = [];
+    if (t.assignee) bits.push('@' + personLabel(t.assignee));
+    if (t.due) bits.push(window.Commands.describeDue(t.due));
+    if (t.creator) bits.push('来自 ' + personLabel(t.creator));
+    meta.textContent = bits.join(' · ');
+    body.append(txt, meta);
+
+    row.append(tick, body);
+    return row;
+  }
+
+  /**
+   * Record a newly created shared to-do in both places that show it.
+   *
+   * The thread and the group view keep separate copies of the same rows, and a /todo made
+   * inside a thread has to land in both or the group list would stay stale until the next
+   * full reload.
+   */
+  function rememberSharedTodo(row) {
+    if (!row || !row.id) return;
+    if (!(S.thread.todos || []).some((t) => t.id === row.id)) S.thread.todos.push(row);
+    const d = S.groupData[row.group_id];
+    if (d && d.todos && !d.todos.some((t) => t.id === row.id)) d.todos.push(row);
+  }
+
+  /** Tick a shared todo from the group list (onThread=false) or from a discussion card. */
+  async function tickSharedTodo(t, onThread) {
+    try {
+      await setSharedTodoDone(t, !t.done);
+    } catch (e) {
+      toast('同步失败：' + ((e && e.message) || '未知错误'));
+    }
+    if (onThread) renderThread(); else render();
+  }
+
+  async function setSharedTodoDone(t, next) {
+    const was = { done: t.done, done_at: t.done_at };
+    t.done = next;
+    t.done_at = next ? new Date().toISOString() : null;
+    try {
+      await window.Api.update('shared_todos', { id: 'eq.' + t.id }, { done: next, done_at: t.done_at });
+      // The group view and the thread keep separate copies of the same row; keep them level.
+      Object.keys(S.groupData).forEach((gid) => {
+        const c = (S.groupData[gid].todos || []).find((x) => x.id === t.id);
+        if (c) { c.done = t.done; c.done_at = t.done_at; }
+      });
+    } catch (e) {
+      t.done = was.done;
+      t.done_at = was.done_at;
+      throw e;
+    }
+  }
+
+  /* --- the discussion area --- */
+
+  async function openThread(idea) {
+    const gid = idea.group_id;
+    S.thread = {
+      idea: idea,
+      group: findGroup(gid) || { id: gid, name: '群组' },
+      messages: [], todos: [], members: [], loading: true, offline: false,
+    };
+    S.threadTodosOpen = true;   // re-decided below once the real list arrives
+    $('#tInput').value = '';
+    $('#tInput').style.height = '';
+    $('#threadSheet').hidden = false;
+    renderThread();
+
+    try {
+      const r = await Promise.all([
+        window.Api.thread(idea.id),
+        window.Api.groupMembers(gid),
+        window.Api.groupTodos(gid),
+      ]);
+      S.thread.messages = r[0] || [];
+      S.thread.members = (r[1] || []).map((m) => ({
+        id: m.member_id,
+        role: m.role,
+        email: (m.profile || {}).email || '',
+        name: personLabel(m.profile),
+      }));
+      S.thread.todos = (r[2] || []).filter((t) => t.share_id === idea.id);
+      await cacheThread(idea.id, S.thread.messages);
+      const d = S.groupData[gid];
+      if (d) { d.todos = r[2] || []; d.members = S.thread.members; }
+    } catch (e) {
+      // A thread that was read once still reads on the train.
+      S.thread.offline = true;
+      S.thread.messages = await cachedThread(idea.id);
+      S.thread.todos = (((S.groupData[gid] || {}).todos) || []).filter((t) => t.share_id === idea.id);
+      toast('读取讨论失败，显示本机缓存：' + ((e && e.message) || '未知错误'));
+    }
+    S.threadTodosOpen = S.thread.todos.length <= 2;
+    S.thread.loading = false;
+    renderThread();
+  }
+
+  async function cacheThread(shareId, msgs) {
+    try {
+      await Promise.all(msgs.map((m) =>
+        window.DB.put('messages', Object.assign({}, m, { threadId: shareId }))));
+    } catch (e) { /* the cache is a convenience, never a requirement */ }
+  }
+
+  async function cachedThread(shareId) {
+    try {
+      const all = await window.DB.all('messages');
+      return all.filter((m) => m.threadId === shareId)
+        .sort((a, b) => (a.created_at < b.created_at ? -1 : 1));
+    } catch (e) { return []; }
+  }
+
+  function renderThread() {
+    const t = S.thread;
+    if (!t) return;
+
+    $('#tTitle').textContent = t.idea.title || '讨论';
+    const bits = [t.group.name];
+    bits.push(t.loading ? '正在读取…' : t.messages.length + ' 条');
+    if (t.offline) bits.push('本机缓存');
+    bits.push('分享于 ' + fmtWhen(new Date(t.idea.shared_at || Date.now()).getTime()));
+    $('#tMeta').textContent = bits.join(' · ');
+
+    const pinBox = $('#tPins');
+    pinBox.innerHTML = '';
+    const pins = t.messages.filter((m) => m.kind === 'command' && m.command === 'pin');
+    pinBox.hidden = !pins.length;
+    pins.forEach((m) => {
+      const el = document.createElement('div');
+      el.className = 'pin';
+      el.innerHTML = icon('pin') + '<span></span>';
+      el.querySelector('span').textContent = (m.payload && m.payload.text) || m.body;
+      pinBox.appendChild(el);
+    });
+
+    const box = $('#tMessages');
+    box.innerHTML = '';
+    if (t.loading) {
+      box.appendChild(loadingState('正在读取讨论…'));
+    } else if (!t.messages.length) {
+      box.appendChild(sectionHint('还没有人说话。用下面的 / 命令，可以直接在这条想法上生成待办或摘要。'));
+    } else {
+      t.messages.forEach((m) => box.appendChild(makeMessage(m)));
+      box.scrollTop = box.scrollHeight;
+    }
+
+    renderThreadTodos();
+    updateComposer();
+  }
+
+  /**
+   * The action list pinned under a thread.
+   *
+   * It duplicates the /todo cards in the conversation, which is the point — it is the
+   * checklist. But it also competes with the conversation for height, so a short list
+   * opens by default and a long one folds, leaving the toggle as the way in. The user's
+   * own choice wins for as long as the thread stays open.
+   */
+  function renderThreadTodos() {
+    const box = $('#tTodos');
+    box.innerHTML = '';
+    const t = S.thread;
+    if (!t || !t.todos.length) { box.hidden = true; return; }
+    box.hidden = false;
+
+    const open = t.todos.filter((x) => !x.done).length;
+    box.appendChild(sectionHead(
+      '这条想法上的待办',
+      open + ' / ' + t.todos.length,
+      S.threadTodosOpen ? '收起' : '展开',
+      () => { S.threadTodosOpen = !S.threadTodosOpen; renderThreadTodos(); }
+    ));
+
+    if (!S.threadTodosOpen) return;
+    t.todos.forEach((x) => box.appendChild(makeSharedTodoRow(x)));
+  }
+
+  function makeMessage(m) {
+    const el = document.createElement('div');
+    el.className = 'msg' +
+      (m.author_id === meId() ? ' mine' : '') +
+      (m.kind === 'command' ? ' cmd' : '');
+    const head = document.createElement('div');
+    head.className = 'msg-head';
+    head.textContent = authorName(m) + ' · ' + fmtWhen(new Date(m.created_at).getTime());
+    const body = document.createElement('div');
+    body.className = 'msg-body';
+    if (m.kind === 'command') fillCommandCard(body, m);
+    else body.textContent = m.body;
+    el.append(head, body);
+    return el;
+  }
+
+  function chip(text) {
+    const s = document.createElement('span');
+    s.className = 'kw';
+    s.textContent = text;
+    return s;
+  }
+
+  /**
+   * Draw a command message from its stored payload.
+   *
+   * The payload is written once, when the command runs, and every later read renders from
+   * it — so reopening the thread shows exactly the same card without recomputing anything.
+   */
+  function fillCommandCard(body, m) {
+    const p = m.payload || {};
+
+    const name = document.createElement('div');
+    name.className = 'cmd-name';
+    name.textContent = '/' + (m.command || '?');
+    body.appendChild(name);
+
+    const out = document.createElement('div');
+    out.className = 'cmd-out';
+
+    switch (m.command) {
+      case 'todo':
+      case 'assign': {
+        const row = document.createElement('div');
+        row.className = 'cmd-todo';
+        const known = (S.thread.todos || []).find((x) => x.id === p.todoId);
+        const tick = document.createElement('button');
+        tick.className = 'tick' + (known && known.done ? ' on' : '');
+        tick.innerHTML = icon('check');
+        tick.disabled = !known;
+        tick.setAttribute('aria-label', known && known.done ? '取消完成' : '标记完成');
+        tick.addEventListener('click', () => { if (known) tickSharedTodo(known, true); });
+        const txt = document.createElement('span');
+        txt.textContent = p.text || m.body;
+        row.append(tick, txt);
+        if (p.assignee) row.appendChild(chip('@' + p.assignee));
+        if (p.due) row.appendChild(chip(window.Commands.describeDue(p.due)));
+        out.appendChild(row);
+        break;
+      }
+
+      case 'done':
+        out.textContent = '勾掉了：' + (p.text || m.body);
+        break;
+
+      case 'tag':
+        out.classList.add('kw-row');
+        (p.tags || []).forEach((tg) => out.appendChild(chip(tg)));
+        break;
+
+      case 'pin':
+        out.textContent = p.text || m.body;
+        break;
+
+      case 'summary': {
+        (p.digest || []).forEach((line) => {
+          const d = document.createElement('div');
+          d.className = 'digest-line';
+          d.textContent = line;
+          out.appendChild(d);
+        });
+        if ((p.keywords || []).length) {
+          const row = document.createElement('div');
+          row.className = 'kw-row';
+          (p.keywords || []).forEach((k) => row.appendChild(chip(typeof k === 'string' ? k : k.term)));
+          out.appendChild(row);
+        }
+        if ((p.actions || []).length) {
+          const acts = document.createElement('div');
+          acts.className = 'action-list';
+          p.actions.forEach((a) => {
+            const li = document.createElement('div');
+            li.className = 'action-row';
+            li.textContent = a;
+            acts.appendChild(li);
+          });
+          out.appendChild(acts);
+        }
+        break;
+      }
+
+      case 'keywords': {
+        const row = document.createElement('div');
+        row.className = 'kw-row';
+        (p.keywords || []).forEach((k) => row.appendChild(chip(typeof k === 'string' ? k : k.term)));
+        out.appendChild(row);
+        break;
+      }
+
+      case 'help':
+        window.Commands.specs().forEach((s) => {
+          const li = document.createElement('div');
+          li.className = 'cmd-help';
+          li.innerHTML = '<code></code><span></span>';
+          li.querySelector('code').textContent = s.usage;
+          li.querySelector('span').textContent = s.hint;
+          out.appendChild(li);
+        });
+        break;
+
+      default:
+        out.textContent = m.body || '';
+    }
+
+    body.appendChild(out);
+  }
+
+  /* --- composer --- */
+
+  function updateComposer() {
+    const raw = $('#tInput').value;
+    const text = raw.trim();
+    const pal = $('#tPalette');
+    const hint = $('#tHint');
+    pal.innerHTML = '';
+
+    // Typing a bare command name: offer the palette. When nothing matches we fall through
+    // to the hint below, so an unknown command still gets explained instead of going quiet.
+    if (/^\/[A-Za-z\u4e00-\u9fa5]*$/.test(text)) {
+      const hits = window.Commands.suggest(text);
+      if (hits.length) {
+        pal.hidden = false;
+        S.cmdPick = 0;
+        hits.forEach((s, i) => {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'pal-row' + (i === 0 ? ' on' : '');
+          b.innerHTML = '<code></code><span></span>';
+          b.querySelector('code').textContent = s.usage;
+          b.querySelector('span').textContent = s.hint;
+          b.addEventListener('click', () => {
+            $('#tInput').value = s.name + ' ';
+            $('#tInput').focus();
+            updateComposer();
+          });
+          pal.appendChild(b);
+        });
+        hint.hidden = true;
+        return;
+      }
+      pal.hidden = true;
+    } else {
+      pal.hidden = true;
+    }
+
+    const p = window.Commands.parse(text);
+    if (p.kind === 'unknown') {
+      hint.hidden = false;
+      hint.classList.add('bad');
+      hint.textContent = '没有 /' + p.command + ' 这个命令，输入 / 看全部命令';
+    } else if (p.kind === 'command') {
+      const ok = window.Commands.isComplete(p);
+      hint.hidden = false;
+      hint.classList.toggle('bad', !ok);
+      hint.textContent = ok ? window.Commands.preview(p) : p.spec.usage;
+    } else {
+      hint.hidden = true;
+    }
+  }
+
+  async function sendThreadMessage() {
+    const input = $('#tInput');
+    const raw = input.value.trim();
+    if (!raw) return;
+    const t = S.thread;
+    if (!t || t.loading) return;
+    if (!onlineReady()) { toast('在线模式未就绪，先到设置里登录'); return; }
+
+    const p = window.Commands.parse(raw);
+    if (p.kind === 'unknown') { toast('没有 /' + p.command + ' 这个命令'); return; }
+    if (p.kind === 'command' && !window.Commands.isComplete(p)) {
+      toast('命令还没写完：' + p.spec.usage);
+      return;
+    }
+
+    const send = $('#tSend');
+    send.disabled = true;
+    try {
+      let kind = 'text', command = null, payload = null, body = raw;
+      if (p.kind === 'command') {
+        const r = await runCommand(p);
+        kind = 'command';
+        command = p.command;
+        payload = r.payload;
+        body = r.body || raw;
+      }
+
+      const saved = await window.Api.postMessage({
+        share_id: t.idea.id,
+        group_id: t.group.id,
+        body: body,
+        kind: kind,
+        command: command,
+        payload: payload,
+      });
+      const row = (Array.isArray(saved) && saved[0]) ? saved[0] : {
+        id: window.DB.uid(), share_id: t.idea.id, group_id: t.group.id,
+        author_id: meId(), author: window.Api.currentUser(),
+        body: body, kind: kind, command: command, payload: payload,
+        created_at: new Date().toISOString(),
+      };
+      t.messages.push(row);
+      await cacheThread(t.idea.id, [row]);
+      input.value = '';
+      input.style.height = '';
+      renderThread();
+    } catch (e) {
+      toast('发送失败：' + ((e && e.message) || '未知错误'));
+    } finally {
+      send.disabled = false;
+      updateComposer();
+    }
+  }
+
+  /**
+   * Run one parsed command and return the { body, payload } stored on the message row.
+   *
+   * Backend side effects happen here, before the message is posted. REST gives us no
+   * transaction across two tables, so if the post then fails the effect stands — a visible
+   * todo is a far better failure mode than a silently dropped one.
+   */
+  async function runCommand(p) {
+    const t = S.thread;
+    const gid = t.group.id;
+
+    switch (p.command) {
+      case 'todo': {
+        const row = await window.Api.insert('shared_todos', [{
+          share_id: t.idea.id, group_id: gid, text: p.args.text,
+          due: p.args.due || null, created_by: meId(),
+        }]);
+        const saved = (Array.isArray(row) && row[0]) || {};
+        if (saved.id) rememberSharedTodo(Object.assign({}, saved, { group_id: gid }));
+        return {
+          body: p.args.text,
+          payload: { todoId: saved.id || null, text: p.args.text, due: p.args.due || '' },
+        };
+      }
+
+      case 'assign': {
+        const who = resolveMember(p.args.who);
+        if (!who) throw new Error('群里没有「' + p.args.who + '」，先确认对方已经加入这个群');
+        const row = await window.Api.insert('shared_todos', [{
+          share_id: t.idea.id, group_id: gid, text: p.args.text,
+          due: p.args.due || null, assignee_id: who.id, created_by: meId(),
+        }]);
+        const saved = (Array.isArray(row) && row[0]) || {};
+        if (saved.id) {
+          rememberSharedTodo(Object.assign({}, saved, {
+            group_id: gid,
+            assignee: { display_name: who.name, email: who.email },
+          }));
+        }
+        return {
+          body: p.args.text,
+          payload: {
+            todoId: saved.id || null, text: p.args.text,
+            due: p.args.due || '', assignee: who.name,
+          },
+        };
+      }
+
+      case 'done': {
+        const target = resolveTodoRef(p.args.ref);
+        if (!target) throw new Error('没有找到「' + p.args.ref + '」这条待办');
+        if (!target.done) await setSharedTodoDone(target, true);
+        return { body: target.text, payload: { todoId: target.id, text: target.text } };
+      }
+
+      case 'tag':
+        return { body: p.args.tags.join(' '), payload: { tags: p.args.tags } };
+
+      case 'pin':
+        return { body: p.args.text, payload: { text: p.args.text } };
+
+      case 'summary': {
+        const out = localSummary(p.args.limit);
+        return { body: out.digest.join(' '), payload: out };
+      }
+
+      case 'keywords': {
+        const out = localKeywords(p.args.limit);
+        return { body: out.keywords.join(' '), payload: { keywords: out.keywords } };
+      }
+
+      case 'help':
+        return { body: '命令列表', payload: {} };
+
+      default:
+        return { body: p.rest, payload: {} };
+    }
+  }
+
+  function resolveMember(handle) {
+    const h = String(handle || '').replace(/^@/, '').trim().toLowerCase();
+    if (!h) return null;
+    return (S.thread.members || []).find((m) =>
+      (m.email || '').toLowerCase() === h ||
+      (m.name || '').toLowerCase() === h ||
+      (m.email || '').toLowerCase().split('@')[0] === h) || null;
+  }
+
+  /** "/done 2" counts the open todos in the order they are shown; "/done 换色" matches text. */
+  function resolveTodoRef(ref) {
+    const r = String(ref || '').trim();
+    if (!r) return null;
+    const list = S.thread.todos || [];
+    if (/^\d+$/.test(r)) {
+      const open = list.filter((x) => !x.done);
+      return open[+r - 1] || list[+r - 1] || null;
+    }
+    const low = r.toLowerCase();
+    return list.find((x) => (x.text || '').toLowerCase().indexOf(low) >= 0) || null;
+  }
+
+  /** The text a command works on: the shared idea plus everything said about it. */
+  function threadCorpus() {
+    const t = S.thread;
+    const said = (t.messages || []).filter((m) => m.kind === 'text').map((m) => m.body);
+    return {
+      idea: [t.idea.title, t.idea.note].filter(Boolean).join('。'),
+      said: said.join('。'),
+    };
+  }
+
+  /**
+   * /summary and /keywords run the same deterministic engine the 提炼要点 sheet uses — no
+   * model, no network, same input always giving the same output.
+   *
+   * The IDF table here is built over just two documents: the idea itself and the
+   * discussion. That is deliberate. A term appearing in both is already-known context,
+   * while a term that only shows up in the discussion is new signal — which is exactly
+   * what you want surfaced when catching up on a thread.
+   */
+  function localSummary(limit) {
+    const c = threadCorpus();
+    const text = [c.idea, c.said].filter(Boolean).join('。');
+    const out = window.Summarize.summarize(text, {
+      idf: window.Summarize.buildIdf([c.idea, c.said]),
+      boost: new Set(window.Summarize.terms(S.thread.idea.title || '')),
+      keywordLimit: 8,
+      digestLimit: limit || 3,
+      actionLimit: 5,
+    });
+    return {
+      keywords: out.keywords.map((k) => k.term),
+      digest: out.digest,
+      actions: out.actions.map((a) => a.text),
+    };
+  }
+
+  function localKeywords(limit) {
+    const c = threadCorpus();
+    const text = [c.idea, c.said].filter(Boolean).join('。');
+    return {
+      keywords: window.Summarize
+        .keywords(text, {
+          idf: window.Summarize.buildIdf([c.idea, c.said]),
+          boost: new Set(window.Summarize.terms(S.thread.idea.title || '')),
+          limit: limit || 10,
+        })
+        .map((k) => k.term),
+    };
+  }
+
+  /* --- contacts sheet --- */
+
+  function openPeopleSheet() {
+    if (!onlineReady()) { toast('先到设置里连接后端并登录'); return; }
+    $('#cEmail').value = '';
+    $('#cAlias').value = '';
+    $('#peopleSheet').hidden = false;
+    renderContactList();
+  }
+
+  function renderContactList() {
+    const box = $('#cList');
+    box.innerHTML = '';
+    const rows = contactRows();
+    if (!rows.length) { box.appendChild(sectionHint('还没有通讯人。')); return; }
+
+    rows.forEach((r) => {
+      const el = document.createElement('div');
+      el.className = 'prow';
+      el.innerHTML = '<div class="prow-body"><p class="prow-name"></p><p class="prow-sub"></p></div>' +
+        '<button class="mini-btn danger">移除</button>';
+      el.querySelector('.prow-name').textContent = r.name;
+      el.querySelector('.prow-sub').textContent = r.email;
+      el.querySelector('button').addEventListener('click', async () => {
+        try {
+          await window.Api.remove('contacts', {
+            owner_id: 'eq.' + meId(), contact_id: 'eq.' + r.id,
+          });
+          await refreshOnline();
+          renderContactList();
+          toast('已移除');
+        } catch (e) {
+          toast('移除失败：' + ((e && e.message) || '未知错误'));
+        }
+      });
+      box.appendChild(el);
+    });
+  }
+
+  async function addContact() {
+    const email = $('#cEmail').value.trim();
+    const alias = $('#cAlias').value.trim();
+    if (!email) { toast('请填写对方的邮箱'); return; }
+
+    const btn = $('#cAdd');
+    btn.disabled = true;
+    const label = btn.textContent;
+    btn.textContent = '正在查找…';
+    try {
+      await window.Api.addContactByEmail(email, alias);
+      $('#cEmail').value = '';
+      $('#cAlias').value = '';
+      await refreshOnline();
+      renderContactList();
+      toast('已添加');
+    } catch (e) {
+      toast('添加失败：' + ((e && e.message) || '未知错误'));
+    } finally {
+      btn.disabled = false;
+      btn.textContent = label;
+    }
+  }
+
+  /* --- group sheet, doubling as the member picker --- */
+
+  function openGroupSheet(g) {
+    if (!onlineReady()) { toast('先到设置里连接后端并登录'); return; }
+    S.groupEdit = g || null;
+    $('#grTitle').textContent = g ? '添加成员' : '新建群组';
+    $('#grNameWrap').hidden = !!g;
+    $('#grName').value = '';
+    $('#grCreate').textContent = g ? '加进「' + g.name + '」' : '创建群组';
+    $('#grHint').textContent = g
+      ? '只有群主能加人。加进来的人登录后就能看到群里的分享和讨论。'
+      : '建好之后随时可以从通讯人里加人。';
+    $('#groupSheet').hidden = false;
+    renderMemberPicker();
+  }
+
+  function renderMemberPicker() {
+    const box = $('#grPick');
+    box.innerHTML = '';
+    const rows = contactRows();
+    if (!rows.length) { box.appendChild(sectionHint('还没有通讯人，先在上面添加。')); return; }
+
+    const g = S.groupEdit;
+    const existing = new Set(
+      (g && S.groupData[g.id] ? (S.groupData[g.id].members || []) : []).map((m) => m.id));
+
+    rows.forEach((r) => {
+      const el = document.createElement('label');
+      el.className = 'pick-item';
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.value = r.id;
+      cb.disabled = existing.has(r.id);
+      const nm = document.createElement('span');
+      nm.className = 'pick-name';
+      nm.textContent = r.name;
+      const sub = document.createElement('span');
+      sub.className = 'pick-sub';
+      sub.textContent = existing.has(r.id) ? '已在群里' : r.email;
+      el.append(cb, nm, sub);
+      box.appendChild(el);
+    });
+  }
+
+  async function createOrExtendGroup() {
+    const g = S.groupEdit;
+    const picked = Array.from($('#grPick').querySelectorAll('input:checked')).map((c) => c.value);
+
+    const btn = $('#grCreate');
+    btn.disabled = true;
+    const label = btn.textContent;
+    btn.textContent = '处理中…';
+    try {
+      let target = g;
+      if (!g) {
+        const name = $('#grName').value.trim();
+        if (!name) { toast('请填写群组名称'); return; }
+        const created = await window.Api.createGroup(name);
+        target = Array.isArray(created) ? created[0] : created;
+        if (!target || !target.id) throw new Error('创建没有返回群组');
+      }
+      for (let i = 0; i < picked.length; i++) {
+        await window.Api.addGroupMember(target.id, picked[i]);
+      }
+      await refreshOnline();
+      delete S.groupData[target.id];
+      await loadGroup(target.id);
+      $('#groupSheet').hidden = true;
+      S.view = 'group:' + target.id;
+      render();
+      toast(g ? '已加进 ' + picked.length + ' 位成员' : '群组已创建');
+    } catch (e) {
+      toast('操作失败：' + ((e && e.message) || '未知错误'));
+    } finally {
+      btn.disabled = false;
+      btn.textContent = label;
+    }
+  }
+
+  /* --- sharing a local idea into a group --- */
+
+  function ideaKeywords(i, limit) {
+    return window.Summarize
+      .keywords(ideaText(i), {
+        idf: corpusIdf(),
+        limit: limit || 6,
+        boost: new Set(window.Summarize.terms(i.title || '')),
+      })
+      .map((k) => k.term);
+  }
+
+  function openShareSheet(idea, gid) {
+    if (!onlineReady()) { toast('先到设置里连接后端并登录'); return; }
+    if (!S.groups.length) { toast('还没有群组，先在社群页建一个'); return; }
+    S.shareIdea = idea || null;
+    S.shareTarget = gid || (S.groups[0] && S.groups[0].id) || null;
+    $('#shareSheet').hidden = false;
+    renderShareSheet();
+  }
+
+  function renderShareSheet() {
+    const iBox = $('#shIdeas');
+    iBox.innerHTML = '';
+    const ideas = S.ideas.slice().sort((a, b) => b.createdAt - a.createdAt);
+    if (!ideas.length) {
+      iBox.appendChild(sectionHint('本机还没有灵感。'));
+    } else {
+      ideas.slice(0, 50).forEach((i) => {
+        const b = document.createElement('button');
+        b.type = 'button';
+        b.className = 'pick-item' + (S.shareIdea && S.shareIdea.id === i.id ? ' on' : '');
+        b.innerHTML = '<span class="pick-name"></span><span class="pick-sub"></span>';
+        b.querySelector('.pick-name').textContent = i.title || '未命名灵感';
+        b.querySelector('.pick-sub').textContent = fmtWhen(i.createdAt);
+        b.addEventListener('click', () => { S.shareIdea = i; renderShareSheet(); });
+        iBox.appendChild(b);
+      });
+    }
+
+    const gBox = $('#shGroups');
+    gBox.innerHTML = '';
+    S.groups.forEach((g) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'pick-item' + (S.shareTarget === g.id ? ' on' : '');
+      b.innerHTML = '<span class="pick-name"></span><span class="pick-sub"></span>';
+      b.querySelector('.pick-name').textContent = g.name;
+      b.querySelector('.pick-sub').textContent = g.owner_id === meId() ? '我创建的' : '我是成员';
+      b.addEventListener('click', () => { S.shareTarget = g.id; renderShareSheet(); });
+      gBox.appendChild(b);
+    });
+
+    const note = $('#shIdea');
+    if (S.shareIdea) {
+      const kw = ideaKeywords(S.shareIdea, 4);
+      note.textContent = '只发文字：标题、备注，还有关键词「' +
+        (kw.length ? kw.join(' · ') : '暂无') + '」。录音留在本机，不会上传。';
+    } else {
+      note.textContent = '先选一条灵感，再选一个群组。只发文字，录音留在本机。';
+    }
+
+    $('#shGo').disabled = !S.shareIdea || !S.shareTarget;
+  }
+
+  async function doShare() {
+    const i = S.shareIdea;
+    const gid = S.shareTarget;
+    if (!i || !gid) return;
+
+    const btn = $('#shGo');
+    btn.disabled = true;
+    const label = btn.textContent;
+    btn.textContent = '正在分享…';
+    try {
+      await window.Api.shareIdea({
+        id: i.id,
+        title: i.title,
+        note: i.note,
+        keywords: ideaKeywords(i, 6),
+        durationMs: i.durationMs,
+        createdAt: i.createdAt,
+        lat: i.lat,
+        lon: i.lon,
+      }, gid);
+      delete S.groupData[gid];
+      await loadGroup(gid);
+      $('#shareSheet').hidden = true;
+      S.view = 'group:' + gid;
+      render();
+      toast('已分享到群里');
+    } catch (e) {
+      toast('分享失败：' + ((e && e.message) || '未知错误'));
+    } finally {
+      btn.disabled = false;
+      btn.textContent = label;
+    }
+  }
+
+  /* ---------------- settings & online mode ---------------- */
+
+  /**
+   * Local mode is the default and never touches the network. Switching to online only
+   * reveals the backend and account fields — nothing is sent until the user configures a
+   * project and signs in.
+   */
+  function setMode(m) {
+    S.mode = m === 'online' ? 'online' : 'local';
+    try { localStorage.setItem('spark.mode', S.mode); } catch (e) { /* ignore */ }
+    if (S.mode === 'local') {
+      // Local mode must not keep a stale copy of anyone else's data in memory.
+      S.contacts = [];
+      S.groups = [];
+      S.groupData = {};
+      S.thread = null;
+      if (S.view === 'people' || S.view.indexOf('group:') === 0) S.view = 'inbox';
+    }
+    renderSettings();
+    render();
+  }
+
+  function renderSettings() {
+    const seg = $('#modeSeg');
+    seg.querySelectorAll('button').forEach((b) => b.classList.toggle('on', b.dataset.mode === S.mode));
+
+    $('#modeHint').textContent = S.mode === 'online'
+      ? '在线模式：可以加通讯人、建群组、把灵感分享出去，并围绕一条灵感讨论。'
+      : '本地模式：内容只存在这台设备上，不联网、不需要账号。';
+
+    $('#onlineBox').hidden = S.mode !== 'online';
+    if (S.mode !== 'online') return;
+
+    const c = window.Api.config();
+    if (!$('#apiUrl').value) $('#apiUrl').value = c.url || '';
+    if (!$('#apiKey').value) $('#apiKey').value = c.anonKey || '';
+
+    const configured = window.Api.isConfigured();
+    const user = window.Api.currentUser();
+
+    $('#authBox').hidden = !configured;
+    $('#authForm').hidden = !!user;      // no point offering a login form once signed in
+    $('#authActions').hidden = !!user;
+    $('#authWho').hidden = !user;
+    if (user) $('#authWhoText').textContent = user.email || '已登录';
+
+    if (!c.url && !c.anonKey) $('#apiState').textContent = '还没有填写后端地址。';
+    else if (!configured) $('#apiState').textContent = '地址或 anon key 看起来不完整。';
+    else $('#apiState').textContent = '已连接：' + c.url;
+  }
+
+  async function refreshOnline() {
+    if (S.mode !== 'online' || !window.Api.isSignedIn()) {
+      S.contacts = [];
+      S.groups = [];
+      render();
+      return;
+    }
+    try {
+      const both = await Promise.all([window.Api.myContacts(), window.Api.myGroups()]);
+      S.contacts = both[0] || [];
+      S.groups = both[1] || [];
+    } catch (e) {
+      S.contacts = [];
+      S.groups = [];
+      toast('读取在线数据失败：' + ((e && e.message) || '未知错误'));
+    }
+    render();
+  }
+
+  async function doAuth(mode) {
+    const email = $('#authEmail').value.trim();
+    const pass = $('#authPass').value;
+    if (!email || !pass) { toast('请填写邮箱和密码'); return; }
+    if (mode === 'up' && pass.length < 6) { toast('密码至少 6 位'); return; }
+
+    const btn = mode === 'up' ? $('#authSignUp') : $('#authSignIn');
+    const label = btn.textContent;
+    btn.disabled = true;
+    btn.textContent = '请稍候…';
+    try {
+      if (mode === 'up') {
+        const r = await window.Api.signUp(email, pass);
+        if (r.needsConfirmation) {
+          toast('注册成功，请先到邮箱确认，然后回来登录');
+        } else {
+          toast('注册完成');
+        }
+      } else {
+        await window.Api.signIn(email, pass);
+        toast('已登录');
+      }
+      $('#authPass').value = '';
+      await refreshOnline();
+    } catch (e) {
+      toast((mode === 'up' ? '注册失败：' : '登录失败：') + ((e && e.message) || '未知错误'));
+    } finally {
+      btn.disabled = false;
+      btn.textContent = label;
+      renderSettings();
+    }
+  }
+
   /* ---------------- backup & storage ---------------- */
   async function renderStats() {
     const grid = $('#statGrid');
@@ -1056,6 +2253,7 @@
 
   function openDataSheet() {
     $('#dataSheet').hidden = false;
+    renderSettings();
     renderStats();
   }
 
@@ -1177,6 +2375,82 @@
     $('#pName').addEventListener('keydown', (e) => { if (e.key === 'Enter') createProject(); });
 
     $('#dataBtn').addEventListener('click', openDataSheet);
+
+    /* --- contacts, groups, sharing --- */
+    $('#cAdd').addEventListener('click', addContact);
+    $('#cAlias').addEventListener('keydown', (e) => { if (e.key === 'Enter') addContact(); });
+    $('#grCreate').addEventListener('click', createOrExtendGroup);
+    $('#grName').addEventListener('keydown', (e) => { if (e.key === 'Enter') createOrExtendGroup(); });
+    $('#shGo').addEventListener('click', doShare);
+
+    /* --- discussion composer --- */
+    const tInput = $('#tInput');
+    tInput.addEventListener('input', () => {
+      tInput.style.height = 'auto';
+      tInput.style.height = Math.min(120, tInput.scrollHeight) + 'px';
+      updateComposer();
+    });
+    tInput.addEventListener('keydown', (e) => {
+      const pal = $('#tPalette');
+      const open = !pal.hidden && pal.children.length > 0;
+
+      if (open && (e.key === 'ArrowDown' || e.key === 'ArrowUp')) {
+        e.preventDefault();
+        S.cmdPick = Math.max(0, Math.min(pal.children.length - 1,
+          S.cmdPick + (e.key === 'ArrowDown' ? 1 : -1)));
+        Array.prototype.forEach.call(pal.children, (c, i) => c.classList.toggle('on', i === S.cmdPick));
+        return;
+      }
+      if (e.key === 'Escape' && open) { e.preventDefault(); pal.hidden = true; return; }
+      if (e.key !== 'Enter' || e.shiftKey) return;
+
+      e.preventDefault();
+      // Enter picks the highlighted command while the palette is open, unless what is
+      // already typed is a complete command that needs no arguments.
+      const p = window.Commands.parse(tInput.value.trim());
+      if (open && !(p.kind === 'command' && window.Commands.isComplete(p))) {
+        const s = window.Commands.suggest(tInput.value.trim())[S.cmdPick];
+        if (s) {
+          tInput.value = s.name + ' ';
+          tInput.focus();
+          updateComposer();
+        }
+        return;
+      }
+      sendThreadMessage();
+    });
+    $('#tSend').addEventListener('click', sendThreadMessage);
+    $('#tCmd').addEventListener('click', () => {
+      tInput.value = '/';
+      tInput.focus();
+      updateComposer();
+    });
+
+    $('#modeSeg').querySelectorAll('button').forEach((b) => {
+      b.addEventListener('click', () => setMode(b.dataset.mode));
+    });
+    $('#apiSave').addEventListener('click', async () => {
+      const url = $('#apiUrl').value.trim();
+      const key = $('#apiKey').value.trim();
+      window.Api.configure({ url: url, anonKey: key });
+      renderSettings();
+      if (!window.Api.isConfigured()) { toast('地址或 anon key 看起来不完整'); return; }
+      // A stale session from a different project must not survive a backend change.
+      await window.Api.signOut();
+      await refreshOnline();
+      toast('已保存后端设置，请登录或注册');
+    });
+    $('#authSignIn').addEventListener('click', () => doAuth('in'));
+    $('#authSignUp').addEventListener('click', () => doAuth('up'));
+    $('#authOut').addEventListener('click', async () => {
+      await window.Api.signOut();
+      await refreshOnline();
+      toast('已退出登录');
+    });
+    $('#authPass').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); doAuth('in'); }
+    });
+
     $('#bExport').addEventListener('click', doExport);
     $('#bImport').addEventListener('click', () => $('#bFile').click());
     $('#bFile').addEventListener('change', (e) => {
@@ -1206,15 +2480,20 @@
     row.firstChild.classList.add('sel');
 
     document.querySelectorAll('[data-close]').forEach((b) => {
-      b.addEventListener('click', () => { $('#' + b.dataset.close).hidden = true; });
+      b.addEventListener('click', () => {
+        $('#' + b.dataset.close).hidden = true;
+        // Leaving a discussion is the natural moment to pick up other members' changes.
+        if (b.dataset.close === 'threadSheet' && S.thread) refreshGroup(S.thread.group.id);
+      });
     });
     document.querySelectorAll('.sheet').forEach((s) => {
       s.addEventListener('click', (e) => {
         if (e.target !== s) return;
         // Tapping away from the save sheet throws the recording away, so route it through
         // the same path as the discard button rather than just hiding the sheet.
-        if (s.id === 'saveSheet') discardPending();
-        else s.hidden = true;
+        if (s.id === 'saveSheet') { discardPending(); return; }
+        s.hidden = true;
+        if (s.id === 'threadSheet' && S.thread) refreshGroup(S.thread.group.id);
       });
     });
   }
@@ -1232,8 +2511,18 @@
     S.ideas = await window.DB.all('ideas');
     S.todos = await window.DB.all('todos');
     invalidateCorpus();
+
+    // The online edition is opt-in and stays dormant until the user flips the switch in
+    // settings; loading the saved config here costs nothing and makes that switch instant.
+    window.Api.load();
+    let savedMode = null;
+    try { savedMode = localStorage.getItem('spark.mode'); } catch (e) { /* ignore */ }
+    S.mode = savedMode === 'online' ? 'online' : 'local';
+
     render();
     bind();
+
+    if (S.mode === 'online' && window.Api.isSignedIn()) refreshOnline();
 
     // Probe the offline recogniser once, up front, so the transcribe buttons start in the
     // right state instead of flipping after a sheet is already open.
