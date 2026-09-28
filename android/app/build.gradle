@@ -7,8 +7,8 @@ android {
         applicationId "com.spark.ideas"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 4
-        versionName "2.2"
+        versionCode 5
+        versionName "2.3"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         // libvosk.so ships for four ABIs (35 MB total). Phones are arm, so drop the two
         // emulator-only x86 builds and keep the download ~19 MB smaller.
