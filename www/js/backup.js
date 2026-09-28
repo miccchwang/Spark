@@ -1,10 +1,12 @@
 /* Spark — backup, restore and storage durability.
    Everything lives in IndexedDB, which a WebView may evict without warning,
    so this module provides a way out: one .zip holding the idea list plus every
-   recording as a normal audio file. */
+   recording and photo as a normal file. */
 window.Backup = (function () {
   const FORMAT = 'spark-backup';
-  const VERSION = 1;
+  /* v2 adds images/. v1 archives still import: their images.json is simply absent, and
+     every idea in them is a recording anyway. */
+  const VERSION = 2;
 
   /* ---------------- helpers ---------------- */
   function extFor(mime) {
@@ -23,6 +25,28 @@ window.Backup = (function () {
     if (e === 'ogg') return 'audio/ogg';
     if (e === 'wav') return 'audio/wav';
     return 'audio/webm';
+  }
+
+  /* Photos keep their real format. In practice nearly everything has already been
+     re-encoded to JPEG on the way in, but a kept-as-is screenshot is still a PNG. */
+  function imgExtFor(mime) {
+    const m = (mime || '').toLowerCase();
+    if (m.indexOf('png') >= 0) return 'png';
+    if (m.indexOf('webp') >= 0) return 'webp';
+    if (m.indexOf('gif') >= 0) return 'gif';
+    if (m.indexOf('heic') >= 0 || m.indexOf('heif') >= 0) return 'heic';
+    if (m.indexOf('bmp') >= 0) return 'bmp';
+    return 'jpg';
+  }
+
+  function imgMimeForExt(ext) {
+    const e = (ext || '').toLowerCase();
+    if (e === 'png') return 'image/png';
+    if (e === 'webp') return 'image/webp';
+    if (e === 'gif') return 'image/gif';
+    if (e === 'heic' || e === 'heif') return 'image/heic';
+    if (e === 'bmp') return 'image/bmp';
+    return 'image/jpeg';
   }
 
   function stamp(d) {
@@ -44,17 +68,19 @@ window.Backup = (function () {
 
   /* ---------------- export ---------------- */
   async function collect() {
-    const [projects, ideas, audio] = await Promise.all([
+    const [projects, ideas, audio, images] = await Promise.all([
       window.DB.all('projects'),
       window.DB.all('ideas'),
       window.DB.all('audio'),
+      window.DB.all('images'),
     ]);
-    return { projects, ideas, audio };
+    return { projects, ideas, audio, images };
   }
 
   async function buildBlob() {
-    const { projects, ideas, audio } = await collect();
+    const { projects, ideas, audio, images } = await collect();
     const audioIndex = [];
+    const imageIndex = [];
     const entries = [];
 
     for (const rec of audio) {
@@ -66,7 +92,29 @@ window.Backup = (function () {
       audioIndex.push({ id: rec.id, file, mime: rec.mime || rec.blob.type || mimeForExt(ext), size: bytes.length });
     }
 
-    const missing = ideas.filter((i) => !audioIndex.some((a) => a.id === i.id)).map((i) => i.id);
+    for (const rec of images) {
+      if (!rec || !rec.blob) continue;
+      const ext = imgExtFor(rec.mime || rec.blob.type);
+      const file = 'images/' + rec.id + '.' + ext;
+      const bytes = new Uint8Array(await rec.blob.arrayBuffer());
+      entries.push({ name: file, data: bytes });
+      imageIndex.push({
+        id: rec.id,
+        ideaId: rec.ideaId,
+        file,
+        mime: rec.mime || rec.blob.type || imgMimeForExt(ext),
+        w: rec.w || 0,
+        h: rec.h || 0,
+        size: bytes.length,
+        createdAt: rec.createdAt || 0,
+      });
+    }
+
+    // Only recordings can have audio. A written or photographic idea without one is not
+    // missing anything.
+    const missing = ideas
+      .filter((i) => (i.kind || 'voice') === 'voice' && !audioIndex.some((a) => a.id === i.id))
+      .map((i) => i.id);
     const now = new Date();
 
     const manifest = {
@@ -74,7 +122,12 @@ window.Backup = (function () {
       version: VERSION,
       app: 'Spark',
       exportedAt: now.toISOString(),
-      counts: { projects: projects.length, ideas: ideas.length, audio: audioIndex.length },
+      counts: {
+        projects: projects.length,
+        ideas: ideas.length,
+        audio: audioIndex.length,
+        images: imageIndex.length,
+      },
       missingAudio: missing,
     };
 
@@ -82,14 +135,17 @@ window.Backup = (function () {
       'Spark 灵感备份',
       '',
       '导出时间：' + now.toLocaleString(),
-      '灵感 ' + ideas.length + ' 条 · 项目 ' + projects.length + ' 个 · 录音 ' + audioIndex.length + ' 段',
+      '灵感 ' + ideas.length + ' 条 · 项目 ' + projects.length + ' 个 · 录音 ' + audioIndex.length +
+        ' 段 · 照片 ' + imageIndex.length + ' 张',
       '',
       '目录说明',
       '  manifest.json  备份信息与统计',
       '  projects.json  项目列表',
-      '  ideas.json     灵感元数据（标题、备注、时间、坐标、时长）',
+      '  ideas.json     灵感元数据（类型、标题、备注、时间、坐标、时长）',
       '  audio.json     录音文件索引（id / 文件名 / 格式 / 大小）',
       '  audio/         每段录音的原文件，可直接双击播放',
+      '  images.json    照片索引（id / 所属灵感 / 文件名 / 尺寸 / 大小）',
+      '  images/        每张照片的原文件，可直接双击查看',
       '',
       '在 Spark 中「从备份导入」即可还原。导入采用合并方式，',
       '已存在的灵感不会被覆盖或重复。',
@@ -102,6 +158,7 @@ window.Backup = (function () {
       { name: 'projects.json', data: JSON.stringify(projects, null, 2) },
       { name: 'ideas.json', data: JSON.stringify(ideas, null, 2) },
       { name: 'audio.json', data: JSON.stringify(audioIndex, null, 2) },
+      { name: 'images.json', data: JSON.stringify(imageIndex, null, 2) },
     ].concat(entries);
 
     const bytes = window.Zip.write(all, now);
@@ -159,18 +216,22 @@ window.Backup = (function () {
     const inProjects = byName.get('projects.json') ? json(byName.get('projects.json').data) : [];
     const inIdeas = byName.get('ideas.json') ? json(byName.get('ideas.json').data) : [];
     const inAudio = byName.get('audio.json') ? json(byName.get('audio.json').data) : [];
+    // Absent in a v1 archive, which is fine: it had no photos.
+    const inImages = byName.get('images.json') ? json(byName.get('images.json').data) : [];
 
-    const [haveProjects, haveIdeas, haveAudio] = await Promise.all([
+    const [haveProjects, haveIdeas, haveAudio, haveImages] = await Promise.all([
       window.DB.all('projects'),
       window.DB.all('ideas'),
       window.DB.all('audio'),
+      window.DB.all('images'),
     ]);
     const projectIds = new Set(haveProjects.map((p) => p.id));
     const ideaIds = new Set(haveIdeas.map((i) => i.id));
     const audioIds = new Set(haveAudio.map((a) => a.id));
+    const imageIds = new Set(haveImages.map((a) => a.id));
 
-    const added = { projects: 0, ideas: 0, audio: 0 };
-    const skipped = { projects: 0, ideas: 0, audio: 0 };
+    const added = { projects: 0, ideas: 0, audio: 0, images: 0 };
+    const skipped = { projects: 0, ideas: 0, audio: 0, images: 0 };
 
     for (const p of inProjects) {
       if (!p || !p.id) continue;
@@ -192,13 +253,39 @@ window.Backup = (function () {
       added.audio++;
     }
 
+    for (const a of inImages) {
+      if (!a || !a.id || !a.file || !a.ideaId) continue;
+      if (imageIds.has(a.id)) { skipped.images++; continue; }
+      const entry = byName.get(a.file);
+      if (!entry) { skipped.images++; continue; }
+      const mime = a.mime || imgMimeForExt(a.file.split('.').pop());
+      await window.DB.put('images', {
+        id: a.id,
+        ideaId: a.ideaId,
+        mime,
+        w: a.w || 0,
+        h: a.h || 0,
+        createdAt: a.createdAt || 0,
+        blob: new Blob([entry.data.slice()], { type: mime }),
+      });
+      imageIds.add(a.id);
+      added.images++;
+    }
+
     for (const i of inIdeas) {
       if (!i || !i.id) continue;
       if (ideaIds.has(i.id)) { skipped.ideas++; continue; }
       const next = Object.assign({}, i);
       // a restored idea must not point at a project that does not exist here
       if (next.projectId && !projectIds.has(next.projectId)) next.projectId = null;
-      if (!audioIds.has(next.id)) next.audioMissing = true;
+      // Only a recording can be missing its audio — a written or photographic idea was
+      // never supposed to have any.
+      const kind = next.kind || 'voice';
+      if (kind === 'voice' && !audioIds.has(next.id)) next.audioMissing = true;
+      if (kind === 'photo') {
+        const landed = inImages.some((im) => im.ideaId === next.id && imageIds.has(im.id));
+        if (!landed) next.imageMissing = true;
+      }
       await window.DB.put('ideas', next);
       ideaIds.add(next.id);
       added.ideas++;

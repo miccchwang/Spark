@@ -1,11 +1,15 @@
 /* Spark — IndexedDB storage layer.
-   stores: projects, ideas, todos, audio (audio kept separate so lists stay light). */
+   stores: projects, ideas, todos, audio, images
+   (audio and images are kept separate from ideas so the lists stay light — a card reads the
+   idea row only, never a megabyte of pixels). */
 window.DB = (function () {
   const NAME = 'spark';
   /* v2 adds todos. Records carry ownerId/groupId/updatedAt/rev from the start even though
      the local edition leaves them null, so switching an install to the online edition does
-     not need another migration. */
-  const VER = 2;
+     not need another migration.
+     v3 adds images. An idea's kind ('voice' | 'text' | 'photo') is stored on the idea row;
+     older rows have no kind and are read as 'voice', which is what they are. */
+  const VER = 3;
   let dbp = null;
 
   function open() {
@@ -31,6 +35,13 @@ window.DB = (function () {
         }
         if (!db.objectStoreNames.contains('audio')) {
           db.createObjectStore('audio', { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains('images')) {
+          // One idea can carry several photos, so this is a child store keyed by its own id
+          // with an ideaId index rather than a 1:1 mirror of the idea row like audio is.
+          const s = db.createObjectStore('images', { keyPath: 'id' });
+          s.createIndex('ideaId', 'ideaId');
+          s.createIndex('createdAt', 'createdAt');
         }
         if (!db.objectStoreNames.contains('messages')) {
           // Discussion threads live offline too, so a thread read on the train still reads.
@@ -63,6 +74,15 @@ window.DB = (function () {
     get: async (name, id) => wrap((await st(name, 'readonly')).get(id)),
     put: async (name, value) => wrap((await st(name, 'readwrite')).put(value)),
     del: async (name, id) => wrap((await st(name, 'readwrite')).delete(id)),
+    /* Read one index of a store, e.g. every photo belonging to one idea. */
+    byIndex: async (name, index, value) =>
+      wrap((await st(name, 'readonly')).index(index).getAll(value)),
+    /* Delete many rows in a single transaction, so a cascade is all-or-nothing
+       rather than a loop of separate commits. */
+    delMany: async (name, ids) => {
+      const s = await st(name, 'readwrite');
+      await Promise.all(ids.map((id) => wrap(s.delete(id))));
+    },
     uid: () => (crypto.randomUUID ? crypto.randomUUID() : 'id-' + Date.now() + '-' + Math.random().toString(36).slice(2, 8)),
   };
 })();

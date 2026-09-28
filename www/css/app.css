@@ -220,6 +220,28 @@ body {
   white-space: pre-wrap; word-break: break-word;
   opacity: .8;
 }
+/* A typed idea's note is the idea itself and can run long; four lines keeps the list
+   scannable without hiding that there is more. */
+.card-note.clamp {
+  display: -webkit-box;
+  -webkit-line-clamp: 4;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* The trailing slot of a card: a play button, a picture, or nothing. */
+.card-tail { flex: none; }
+.card-shot {
+  width: 54px; height: 54px;
+  border: var(--line) solid var(--ink);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  display: grid; place-items: center;
+  background: var(--paper);
+}
+.card-shot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.card-shot.blank { border-style: dashed; }
+.card-shot.blank .ico { width: 20px; height: 20px; opacity: .45; }
 
 .play {
   flex: none;
@@ -284,6 +306,24 @@ body {
 }
 .rec-btn .ico { width: 28px; height: 28px; stroke-width: 1.6; }
 .rec-btn:active { background: var(--paper); color: var(--ink); }
+
+/* 文字 and 拍照 sit either side of the microphone. Smaller and outlined, so the
+   hierarchy reads at a glance: voice is still the primary way in. */
+.rec-actions { display: flex; align-items: center; gap: 24px; }
+.rec-alt {
+  pointer-events: auto;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  width: 52px; height: 52px;
+  border-radius: 50%;
+  border: var(--line) solid var(--ink);
+  background: var(--paper);
+  color: var(--ink);
+  cursor: pointer;
+  padding: 0;
+}
+.rec-alt .ico { width: 17px; height: 17px; stroke-width: 1.7; }
+.rec-alt span { font-size: 8.5px; font-weight: 800; letter-spacing: .08em; }
+.rec-alt:active { background: var(--ink); color: var(--paper); }
 
 /* ---------- recording panel ---------- */
 .recpanel {
@@ -479,6 +519,8 @@ body {
   border-radius: var(--r-md);
   padding: 11px 13px;
 }
+/* the running total sits alone across the bottom of the 2-column grid */
+.stat.wide { grid-column: 1 / -1; }
 .stat .k {
   font-size: 9.5px; font-weight: 800;
   letter-spacing: .16em; text-transform: uppercase;
@@ -534,6 +576,93 @@ body {
   letter-spacing: .16em; text-transform: uppercase;
   opacity: .6;
 }
+
+/* ---------- photos ---------- */
+.shots {
+  display: flex; gap: 8px;
+  overflow-x: auto; padding-bottom: 2px;
+  scrollbar-width: none;
+}
+.shots::-webkit-scrollbar { display: none; }
+
+.shot {
+  flex: none;
+  width: 80px; height: 80px;
+  border: var(--line) solid var(--ink);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  background: var(--paper);
+  cursor: pointer;
+  padding: 0;
+}
+.shot img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.shot:active { opacity: .7; }
+
+/* the save sheet's review strip: same size, plus a way to drop one and add more */
+.shot-cell {
+  position: relative; flex: none;
+  width: 80px; height: 80px;
+  border: var(--line) solid var(--ink);
+  border-radius: var(--r-sm);
+  overflow: hidden;
+  background: var(--paper);
+}
+.shot-cell img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.shot-cell.blank { border-style: dashed; }
+.shot-x {
+  position: absolute; top: 0; right: 0;
+  width: 22px; height: 22px;
+  display: grid; place-items: center;
+  border: none;
+  border-left: var(--line) solid var(--ink);
+  border-bottom: var(--line) solid var(--ink);
+  border-radius: 0 0 0 7px;
+  background: var(--paper); color: var(--ink);
+  cursor: pointer; padding: 0;
+}
+.shot-x .ico { width: 11px; height: 11px; stroke-width: 2.6; }
+.shot-add {
+  flex: none;
+  width: 80px; height: 80px;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+  border: var(--line) dashed var(--ink);
+  border-radius: var(--r-sm);
+  background: var(--paper); color: var(--ink);
+  font-family: inherit; font-size: 9px; font-weight: 800; letter-spacing: .12em;
+  cursor: pointer; padding: 0;
+}
+.shot-add .ico { width: 18px; height: 18px; }
+
+/* ---------- full-screen photo viewer ---------- */
+.viewer {
+  position: fixed; inset: 0; z-index: 200;
+  background: var(--paper);
+  display: flex; align-items: center; justify-content: center;
+  padding: calc(56px + var(--safe-top)) 14px calc(46px + var(--safe-bottom));
+}
+.viewer img {
+  max-width: 100%; max-height: 100%;
+  object-fit: contain;
+  border: var(--line) solid var(--ink);
+}
+.viewer-x { position: absolute; top: calc(12px + var(--safe-top)); right: 12px; }
+.viewer-bar {
+  position: absolute; left: 0; right: 0; bottom: calc(14px + var(--safe-bottom));
+  display: flex; justify-content: center; gap: 14px;
+  font-size: 10.5px; font-weight: 700;
+  letter-spacing: .1em; font-variant-numeric: tabular-nums;
+  opacity: .72;
+}
+.shot-nav {
+  position: absolute; left: 0; right: 0; top: 50%;
+  transform: translateY(-50%);
+  display: flex; justify-content: space-between;
+  padding: 0 8px;
+  pointer-events: none;
+}
+.shot-nav button { pointer-events: auto; }
+.shot-nav button[disabled] { opacity: .22; }
+.ico.flip { transform: rotate(180deg); }
 .chip-row {
   display: flex; gap: 7px;
   overflow-x: auto; padding-bottom: 2px;

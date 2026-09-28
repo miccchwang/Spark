@@ -12,7 +12,8 @@
     currentId: null,
     newIcon: 'bulb',
     delArmed: false,
-    pending: null,        // a finished recording waiting for its topic, not yet persisted
+    pending: null,        // a finished capture waiting for its topic, not yet persisted:
+                          // { kind: 'voice'|'text'|'photo', blob?, shots?, lat, lon, projectId }
     speech: null,         // result of the offline recogniser probe
     distill: null,        // the payload currently shown in the distill sheet
     mode: 'local',        // 'local' keeps everything on device; 'online' adds the backend
@@ -71,6 +72,22 @@
   const findTodo = (id) => S.todos.find((t) => t.id === id);
   const openTodos = () => S.todos.filter((t) => !t.done);
   const ideaText = (i) => [i.title, i.note].filter(Boolean).join('。');
+
+  /* An idea arrives one of three ways. Rows written before photos existed carry no kind
+     and are, correctly, recordings. */
+  const KIND_ICON = { voice: 'timer', text: 'edit', photo: 'camera' };
+  const KIND_LABEL = { voice: '语音', text: '文字', photo: '照片' };
+  const ideaKind = (i) => i.kind || 'voice';
+
+  /* The third line of a card's meta: how long it runs, or what it is made of. */
+  function kindMeta(i) {
+    const kind = ideaKind(i);
+    if (kind === 'voice') return icon('timer', 'sm') + '<span>' + fmtDur(i.durationMs) + '</span>';
+    if (kind === 'photo') {
+      return icon('camera', 'sm') + '<span>' + (i.photoCount || 1) + ' 张照片</span>';
+    }
+    return icon('edit', 'sm') + '<span>文字</span>';
+  }
 
   /* Distillation ranks terms against the user's own corpus, so the IDF table is rebuilt
      whenever the ideas change and reused across every render in between. */
@@ -143,7 +160,7 @@
     $('#viewSub').textContent = visibleIdeas().length + ' 个灵感';
     $('#recMeta').textContent = isInbox
       ? '长按卡片可拖到上方项目归档'
-      : '新录音会存进「' + projName(S.view) + '」';
+      : '新记录会存进「' + projName(S.view) + '」';
   }
 
   function makeChip(o) {
@@ -195,7 +212,7 @@
       e.className = 'empty';
       e.innerHTML = S.query
         ? icon('search', 'lg big') + '没有匹配的灵感'
-        : icon('spark', 'lg big') + '这里还空着<br>点下面的按钮，把刚冒出来的想法说出来';
+        : icon('spark', 'lg big') + '这里还空着<br>写下来、拍下来，或者说出来';
       list.appendChild(e);
       return;
     }
@@ -203,15 +220,16 @@
   }
 
   function makeCard(i) {
+    const kind = ideaKind(i);
     const el = document.createElement('div');
     el.className = 'card';
     el.dataset.id = i.id;
     el.innerHTML =
       '<div class="card-top"><span class="grip">' + icon('grip') + '</span>' +
       '<div class="card-body"><p class="card-title"></p><div class="card-meta">' +
-      '<span class="m-when"></span><span class="m-loc"></span><span class="m-dur"></span>' +
+      '<span class="m-when"></span><span class="m-loc"></span><span class="m-kind"></span>' +
       '</div><p class="card-note"></p></div>' +
-      '<button class="play" aria-label="播放">' + icon('play') + '</button></div>';
+      '<div class="card-tail"></div></div>';
 
     const title = el.querySelector('.card-title');
     title.textContent = i.title || '未命名灵感';
@@ -220,13 +238,42 @@
     el.querySelector('.m-when').innerHTML = icon('clock', 'sm') + '<span>' + fmtWhen(i.createdAt) + '</span>';
     el.querySelector('.m-loc').innerHTML = icon('pin', 'sm') + '<span>' +
       (i.lat == null ? '无位置' : i.lat.toFixed(2) + ', ' + i.lon.toFixed(2)) + '</span>';
-    el.querySelector('.m-dur').innerHTML = icon('timer', 'sm') + '<span>' + fmtDur(i.durationMs) + '</span>';
+    el.querySelector('.m-kind').innerHTML = kindMeta(i);
 
     const note = el.querySelector('.card-note');
-    if (i.note) { note.textContent = i.note; } else { note.remove(); }
+    if (i.note) {
+      note.textContent = i.note;
+      // A typed idea's note *is* the idea, so it can run long — keep the list scannable.
+      if (kind === 'text') note.classList.add('clamp');
+    } else {
+      note.remove();
+    }
 
-    const play = el.querySelector('.play');
-    play.addEventListener('click', (e) => { e.stopPropagation(); togglePlay(i.id); });
+    /* The trailing slot: a play button for a recording, the picture itself for a photo,
+       and nothing at all for typed text. */
+    const tail = el.querySelector('.card-tail');
+    if (kind === 'voice') {
+      const play = document.createElement('button');
+      play.className = 'play';
+      play.setAttribute('aria-label', '播放');
+      play.innerHTML = icon('play');
+      play.addEventListener('click', (e) => { e.stopPropagation(); togglePlay(i.id); });
+      tail.appendChild(play);
+    } else if (kind === 'photo') {
+      const shot = document.createElement('div');
+      shot.className = 'card-shot';
+      if (i.thumb) {
+        const img = document.createElement('img');
+        img.src = i.thumb;
+        img.alt = '';
+        shot.appendChild(img);
+      } else {
+        // Undecodable source format, or a photo restored from a backup without pixels.
+        shot.classList.add('blank');
+        shot.innerHTML = icon('camera');
+      }
+      tail.appendChild(shot);
+    }
 
     el.addEventListener('click', (e) => {
       if (e.target.closest('.play')) return;
@@ -445,6 +492,7 @@
   function openDetail(id) {
     const i = findIdea(id);
     if (!i) return;
+    const kind = ideaKind(i);
     S.currentId = id;
     S.delArmed = false;
     $('#dName').value = i.title || '';
@@ -458,14 +506,107 @@
       : i.lat.toFixed(5) + ', ' + i.lon.toFixed(5) +
         ' · <a href="geo:0,0?q=' + i.lat + ',' + i.lon + '">在地图中查看</a>';
     const inProj = i.projectId ? projName(i.projectId) : '收件箱（未归档）';
+    const what = kind === 'voice'
+      ? '时长 ' + fmtDur(i.durationMs)
+      : (kind === 'photo' ? (i.photoCount || 1) + ' 张照片' : '文字灵感');
     $('#dMeta').innerHTML =
       metaRow('clock', fmtFull(i.createdAt)) +
       metaRow('pin', where) +
       metaRow('folder', inProj) +
-      metaRow('timer', '时长 ' + fmtDur(i.durationMs));
+      metaRow(KIND_ICON[kind], what);
+
+    // Only a recording has a player, and only a recording has anything to transcribe.
+    const isVoice = kind === 'voice';
+    $('#dPlayerWrap').hidden = !isVoice;
+    $('#dTransRow').hidden = !isVoice;
     $('#dDur').textContent = '00:00';
     $('#dSeek').value = 0;
+    renderDetailShots(i);
     syncPlayIcons();
+  }
+
+  /* ---------- the photos of one idea ---------- */
+
+  /* Loaded when the detail sheet opens and released when it closes: the list itself
+     draws from the inline thumbnail and never touches this store. */
+  async function renderDetailShots(i) {
+    const box = $('#dShots');
+    window.Photo.release();
+    box.innerHTML = '';
+
+    if (ideaKind(i) !== 'photo') { box.hidden = true; return; }
+
+    let recs = [];
+    try {
+      recs = await window.DB.byIndex('images', 'ideaId', i.id);
+    } catch (e) {
+      recs = [];
+    }
+    recs.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0));
+
+    if (!recs.length) {
+      box.hidden = false;
+      box.innerHTML = '<p class="hint">' +
+        (i.imageMissing ? '照片不在本机：导入的备份里没有带上这些图片' : '照片已丢失') + '</p>';
+      return;
+    }
+    box.hidden = false;
+    recs.forEach((r, n) => {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.className = 'shot';
+      const img = document.createElement('img');
+      img.src = window.Photo.url(r);
+      img.alt = '照片 ' + (n + 1);
+      b.appendChild(img);
+      b.addEventListener('click', () => openViewer(recs, n));
+      box.appendChild(b);
+    });
+  }
+
+  /* ---------- full-screen viewer ---------- */
+
+  let viewer = null;
+  const viewerUrls = new Map();
+
+  function openViewer(recs, at) {
+    viewer = { recs, at };
+    viewerUrls.clear();
+    paintViewer();
+    $('#shotViewer').hidden = false;
+  }
+
+  function viewerUrl(r) {
+    if (!viewerUrls.has(r.id)) viewerUrls.set(r.id, window.Photo.url(r));
+    return viewerUrls.get(r.id);
+  }
+
+  function paintViewer() {
+    if (!viewer) return;
+    const r = viewer.recs[viewer.at];
+    if (!r) return;
+    $('#shotImg').src = viewerUrl(r);
+    $('#shotCount').textContent = (viewer.at + 1) + ' / ' + viewer.recs.length;
+    $('#shotPrev').disabled = viewer.at === 0;
+    $('#shotNext').disabled = viewer.at === viewer.recs.length - 1;
+    $('#shotNav').hidden = viewer.recs.length < 2;
+    $('#shotInfo').textContent = (r.w && r.h ? r.w + ' × ' + r.h + ' · ' : '') +
+      window.Backup.human((r.blob && r.blob.size) || 0);
+  }
+
+  function closeViewer() {
+    viewer = null;
+    viewerUrls.clear();
+    $('#shotImg').removeAttribute('src');
+    $('#shotViewer').hidden = true;
+  }
+
+  function stepViewer(delta) {
+    if (!viewer) return;
+    const next = viewer.at + delta;
+    if (next < 0 || next >= viewer.recs.length) return;
+    viewer.at = next;
+    paintViewer();
   }
 
   async function saveDetailFields() {
@@ -490,6 +631,13 @@
       return;
     }
     if (S.audioId === i.id) stopAudio();
+    closeViewer();
+    window.Photo.release();
+    // The photos are a child store, so they do not go away with the idea row.
+    try {
+      const shots = await window.DB.byIndex('images', 'ideaId', i.id);
+      if (shots.length) await window.DB.delMany('images', shots.map((s) => s.id));
+    } catch (e) { /* nothing stored under this idea */ }
     await window.DB.del('ideas', i.id);
     await window.DB.del('audio', i.id);
     S.ideas = S.ideas.filter((x) => x.id !== i.id);
@@ -596,12 +744,16 @@
     clearInterval(recInterval);
     $('#recPanel').hidden = true;
 
-    const loc = await locPromise;
     if (!out.blob || out.blob.size < 500) { toast('录音太短，已丢弃'); return; }
 
     // Nothing is written yet. The save sheet collects the topic first, so a recording the
     // user walks away from never lands in the database.
-    openSaveSheet(out, loc);
+    openSaveSheet({
+      kind: 'voice',
+      blob: out.blob,
+      mime: out.mime,
+      durationMs: out.durationMs,
+    });
   }
 
   async function cancelRecording() {
@@ -611,31 +763,149 @@
     toast('已丢弃');
   }
 
+  /* ---------------- three ways in: text, photo, voice ---------------- */
+
+  /* Typed ideas need no permission and no picker, so they go straight to the save sheet. */
+  function startText() {
+    if (S.pending) { toast('先把上一条灵感存好'); return; }
+    fetchLocation();
+    openSaveSheet({ kind: 'text' });
+  }
+
+  /* The picker has to be opened synchronously inside the tap, before the first await,
+     or the WebView stops treating it as a user gesture and the dialog never appears. */
+  async function startPhoto(fromCamera) {
+    if (S.pending) { toast('先把上一条灵感存好'); return; }
+    const picking = fromCamera ? window.Photo.camera() : window.Photo.gallery();
+    fetchLocation();                       // start the fix while the camera is open
+    let shots = [];
+    try {
+      shots = await picking;
+    } catch (e) {
+      toast('无法读取照片');
+      return;
+    }
+    if (!shots.length) return;             // backed out of the picker
+    openSaveSheet({ kind: 'photo', shots });
+  }
+
   /* ---------------- save sheet: topic before the idea is stored ---------------- */
 
-  function openSaveSheet(out, loc) {
-    S.pending = {
-      blob: out.blob,
-      mime: out.mime,
-      durationMs: out.durationMs,
-      lat: loc ? loc.lat : null,
-      lon: loc ? loc.lon : null,
-      projectId: S.view === 'inbox' ? null : S.view,
-    };
+  function openSaveSheet(pend) {
+    /* Capture from inside a project files into it. The guard matters: the rail's other
+       entries (待办 / 社群) are views, not projects, and using one as a projectId would
+       file the idea under an id no list ever shows. */
+    const inProject = S.projects.some((x) => x.id === S.view) ? S.view : null;
+    const p = Object.assign({ lat: null, lon: null, projectId: inProject }, pend);
+    S.pending = p;
+    const kind = p.kind || 'voice';
 
     $('#sTitle').value = '';
     $('#sNote').value = '';
-    $('#sMeta').innerHTML =
-      metaRow('clock', fmtWhen(Date.now())) +
-      metaRow('pin', S.pending.lat == null
-        ? '未记录位置'
-        : S.pending.lat.toFixed(4) + ', ' + S.pending.lon.toFixed(4)) +
-      metaRow('timer', '时长 ' + fmtDur(S.pending.durationMs));
-
+    applySavePlaceholders(kind);
+    renderSaveMeta();
+    renderSaveShots();
     renderSaveProjects();
+
+    // Only a recording has anything to transcribe.
+    $('#sTransRow').hidden = kind !== 'voice';
     resetTransStatus($('#sTransStatus'));
+
     $('#saveSheet').hidden = false;
-    setTimeout(() => $('#sTitle').focus(), 150);
+    setTimeout(() => {
+      // For typed text the note *is* the content, so that is where the cursor belongs.
+      (kind === 'text' ? $('#sNote') : $('#sTitle')).focus();
+    }, 150);
+
+    // Location arrives when it arrives. Making the sheet wait for a GPS fix used to stall
+    // it for up to twelve seconds on a cold start.
+    if (locPromise) {
+      locPromise.then((loc) => {
+        if (S.pending !== p || !loc) return;
+        p.lat = loc.lat;
+        p.lon = loc.lon;
+        renderSaveMeta();
+      });
+    }
+  }
+
+  function applySavePlaceholders(kind) {
+    const t = $('#sTitle');
+    const n = $('#sNote');
+    if (kind === 'text') {
+      t.placeholder = '主题（可选）';
+      n.placeholder = '把想法写下来…';
+      n.rows = 6;
+    } else if (kind === 'photo') {
+      t.placeholder = '主题，例如「白板上的架构图」';
+      n.placeholder = '给照片加一句备注（可选）';
+      n.rows = 3;
+    } else {
+      t.placeholder = '主题，例如「登录页的动效想法」';
+      n.placeholder = '补充信息（可选）';
+      n.rows = 3;
+    }
+  }
+
+  function renderSaveMeta() {
+    const p = S.pending;
+    if (!p) return;
+    const kind = p.kind || 'voice';
+    const rows = [
+      metaRow('clock', fmtWhen(Date.now())),
+      metaRow('pin', p.lat == null ? '未记录位置' : p.lat.toFixed(4) + ', ' + p.lon.toFixed(4)),
+    ];
+    if (kind === 'voice') rows.push(metaRow('timer', '时长 ' + fmtDur(p.durationMs)));
+    else if (kind === 'photo') rows.push(metaRow('camera', (p.shots || []).length + ' 张照片'));
+    else rows.push(metaRow('edit', '文字灵感'));
+    $('#sMeta').innerHTML = rows.join('');
+  }
+
+  /* The review strip: thumbnails you can drop, and a way to add more from the album. */
+  function renderSaveShots() {
+    const p = S.pending;
+    const wrap = $('#sShotsWrap');
+    const box = $('#sShots');
+    const kind = p ? (p.kind || 'voice') : 'voice';
+    if (!p || kind !== 'photo') { wrap.hidden = true; box.innerHTML = ''; return; }
+
+    wrap.hidden = false;
+    box.innerHTML = '';
+    p.shots.forEach((s, n) => {
+      const cell = document.createElement('div');
+      cell.className = 'shot-cell';
+      const img = document.createElement('img');
+      img.alt = '照片 ' + (n + 1);
+      if (s.thumb) img.src = s.thumb;
+      else cell.classList.add('blank');
+      cell.appendChild(img);
+
+      const x = document.createElement('button');
+      x.type = 'button';
+      x.className = 'shot-x';
+      x.setAttribute('aria-label', '移除这张照片');
+      x.innerHTML = icon('close');
+      x.addEventListener('click', () => {
+        p.shots.splice(n, 1);
+        renderSaveShots();
+        renderSaveMeta();
+      });
+      cell.appendChild(x);
+      box.appendChild(cell);
+    });
+
+    const add = document.createElement('button');
+    add.type = 'button';
+    add.className = 'shot-add';
+    add.innerHTML = icon('plus') + '<span>相册</span>';
+    add.addEventListener('click', async () => {
+      const more = await window.Photo.gallery();
+      if (!more.length) return;
+      p.shots = p.shots.concat(more);
+      renderSaveShots();
+      renderSaveMeta();
+    });
+    box.appendChild(add);
   }
 
   function renderSaveProjects() {
@@ -661,20 +931,48 @@
     const pend = S.pending;
     if (!pend) return;
 
+    const shots = pend.shots || [];
+    // Dropping every photo leaves a written note, which is what it has become.
+    let kind = pend.kind || 'voice';
+    if (kind === 'photo' && !shots.length) kind = 'text';
+
     const id = window.DB.uid();
-    await window.DB.put('audio', { id, blob: pend.blob, mime: pend.mime });
+
+    // Only a recording writes an audio row. Writing one for a text or photo idea would
+    // make the "audio is missing" flag a lie the first time it was restored.
+    if (kind === 'voice') {
+      await window.DB.put('audio', { id, blob: pend.blob, mime: pend.mime });
+    }
 
     const idea = {
       id,
+      kind,
       projectId: pend.projectId || null,
       title: $('#sTitle').value.trim(),
       note: $('#sNote').value.trim(),
-      durationMs: pend.durationMs,
+      durationMs: kind === 'voice' ? pend.durationMs : 0,
       createdAt: Date.now(),
       lat: pend.lat,
       lon: pend.lon,
     };
+    if (kind === 'photo') {
+      idea.photoCount = shots.length;
+      // The list draws its thumbnail from here, so it never has to open the image store.
+      idea.thumb = (shots.find((s) => s.thumb) || {}).thumb || '';
+    }
     await window.DB.put('ideas', idea);
+
+    for (const s of shots) {
+      await window.DB.put('images', {
+        id: window.DB.uid(),
+        ideaId: id,
+        mime: s.mime,
+        w: s.w,
+        h: s.h,
+        createdAt: Date.now(),
+        blob: s.blob,
+      });
+    }
 
     S.ideas.push(idea);
     invalidateCorpus();
@@ -688,14 +986,16 @@
       card.scrollIntoView({ block: 'center', behavior: 'smooth' });
     }
     const where = idea.projectId ? '「' + projName(idea.projectId) + '」' : '收件箱';
-    toast('已存到' + where + (idea.lat == null ? ' · 无位置' : ' · 含位置'));
+    const extra = kind === 'photo' ? ' · ' + shots.length + ' 张照片' : '';
+    toast('已存到' + where + extra + (idea.lat == null ? ' · 无位置' : ' · 含位置'));
   }
 
   async function discardPending() {
     if (!S.pending) return;
-    await window.Speech.cancel();
+    if ((S.pending.kind || 'voice') === 'voice') await window.Speech.cancel();
     S.pending = null;
     $('#saveSheet').hidden = true;
+    $('#sShotsWrap').hidden = true;
     resetTransStatus($('#sTransStatus'));
     toast('已丢弃');
   }
@@ -2209,20 +2509,25 @@
   /* ---------------- backup & storage ---------------- */
   async function renderStats() {
     const grid = $('#statGrid');
-    const audio = await window.DB.all('audio');
+    const [audio, images] = await Promise.all([
+      window.DB.all('audio'),
+      window.DB.all('images'),
+    ]);
     const audioBytes = audio.reduce((n, a) => n + ((a.blob && a.blob.size) || 0), 0);
+    const imageBytes = images.reduce((n, a) => n + ((a.blob && a.blob.size) || 0), 0);
     const info = await window.Backup.info();
 
     const cells = [
       ['灵感', S.ideas.length + ' 条'],
       ['项目', S.projects.length + ' 个'],
       ['录音', audio.length + ' 段 · ' + window.Backup.human(audioBytes)],
-      ['已用空间', window.Backup.human(info.usage)],
+      ['照片', images.length + ' 张 · ' + window.Backup.human(imageBytes)],
+      ['已用空间', window.Backup.human(info.usage) + ' / ' + window.Backup.human(info.quota)],
     ];
     grid.innerHTML = '';
-    cells.forEach((pair) => {
+    cells.forEach((pair, n) => {
       const box = document.createElement('div');
-      box.className = 'stat';
+      box.className = 'stat' + (n === cells.length - 1 ? ' wide' : '');
       const k = document.createElement('div');
       k.className = 'k';
       k.textContent = pair[0];
@@ -2247,7 +2552,7 @@
       wrap.classList.remove('ok');
       wrap.querySelector('.ico').outerHTML = icon('warn');
       btn.hidden = false;
-      txt.textContent = '持久化存储未开启，系统在空间紧张时可能清掉录音。建议先导出备份。';
+      txt.textContent = '持久化存储未开启，系统在空间紧张时可能清掉录音和照片。建议先导出备份。';
     }
   }
 
@@ -2291,8 +2596,11 @@
       invalidateCorpus();
       render();
       await renderStats();
-      if (r.added.ideas || r.added.projects || r.added.audio) {
-        toast('导入完成：' + r.added.ideas + ' 条灵感 · ' + r.added.audio + ' 段录音');
+      if (r.added.ideas || r.added.projects || r.added.audio || r.added.images) {
+        const bits = [r.added.ideas + ' 条灵感'];
+        if (r.added.audio) bits.push(r.added.audio + ' 段录音');
+        if (r.added.images) bits.push(r.added.images + ' 张照片');
+        toast('导入完成：' + bits.join(' · '));
       } else {
         toast('备份里的内容都已经存在了');
       }
@@ -2320,8 +2628,20 @@
     $('#searchInput').addEventListener('input', (e) => { S.query = e.target.value.trim(); renderList(); renderHeader(); });
 
     $('#recBtn').addEventListener('click', startRecording);
+    $('#textBtn').addEventListener('click', startText);
+    $('#photoBtn').addEventListener('click', () => startPhoto(true));
     $('#recStop').addEventListener('click', finishRecording);
     $('#recCancel').addEventListener('click', cancelRecording);
+
+    /* --- photo viewer --- */
+    $('#shotClose').addEventListener('click', closeViewer);
+    $('#shotPrev').addEventListener('click', (e) => { e.stopPropagation(); stepViewer(-1); });
+    $('#shotNext').addEventListener('click', (e) => { e.stopPropagation(); stepViewer(1); });
+    $('#shotViewer').addEventListener('click', (e) => {
+      // Tapping the picture or the backdrop dismisses; the arrows are a control, not a tap.
+      if (e.target.closest('.shot-nav')) return;
+      closeViewer();
+    });
 
     $('#dPlay').addEventListener('click', () => { if (S.currentId) togglePlay(S.currentId); });
     const seek = $('#dSeek');
@@ -2362,7 +2682,8 @@
       if (e.key === 'Enter') { e.preventDefault(); commitSave(); }
     });
     $('#sTranscribe').addEventListener('click', () => {
-      if (!S.pending) return;
+      // Only a recording can be transcribed; the row is hidden for the other two kinds.
+      if (!S.pending || !S.pending.blob) return;
       const base = $('#sNote').value.trim();
       transcribeBlob(S.pending.blob, $('#sTranscribe'), $('#sTransStatus'), (text, streaming) => {
         $('#sNote').value = base ? base + '\n' + text : text;
@@ -2484,16 +2805,18 @@
         $('#' + b.dataset.close).hidden = true;
         // Leaving a discussion is the natural moment to pick up other members' changes.
         if (b.dataset.close === 'threadSheet' && S.thread) refreshGroup(S.thread.group.id);
+        if (b.dataset.close === 'detailSheet') { closeViewer(); window.Photo.release(); }
       });
     });
     document.querySelectorAll('.sheet').forEach((s) => {
       s.addEventListener('click', (e) => {
         if (e.target !== s) return;
-        // Tapping away from the save sheet throws the recording away, so route it through
+        // Tapping away from the save sheet throws the capture away, so route it through
         // the same path as the discard button rather than just hiding the sheet.
         if (s.id === 'saveSheet') { discardPending(); return; }
         s.hidden = true;
         if (s.id === 'threadSheet' && S.thread) refreshGroup(S.thread.group.id);
+        if (s.id === 'detailSheet') { closeViewer(); window.Photo.release(); }
       });
     });
   }

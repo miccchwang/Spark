@@ -63,6 +63,7 @@
   <symbol id="i-users" viewBox="0 0 24 24"><circle cx="9.4" cy="8.3" r="3.5"/><path d="M3.3 19.6c0-3.4 2.7-5.5 6.1-5.5s6.1 2.1 6.1 5.5"/><path d="M16.3 5.4a3.5 3.5 0 0 1 0 6.8M17.6 14.3c1.9.8 3.1 2.5 3.1 5.3"/></symbol>
   <symbol id="i-go" viewBox="0 0 24 24"><path d="M9.6 5.4 16.2 12l-6.6 6.6"/></symbol>
   <symbol id="i-send" viewBox="0 0 24 24"><path d="M4.2 11.6 20.2 4.2 12.8 20.2l-2.1-6.5-6.5-2.1Z"/><path d="M20.2 4.2 10.7 13.7"/></symbol>
+  <symbol id="i-camera" viewBox="0 0 24 24"><path d="M4.3 8.9a2 2 0 0 1 2-2h1.6l1.2-2.1h5.8l1.2 2.1h1.6a2 2 0 0 1 2 2v8.1a2 2 0 0 1-2 2H6.3a2 2 0 0 1-2-2V8.9Z"/><circle cx="12" cy="12.9" r="3.3"/></symbol>
 </svg>
 
 <header class="topbar">
@@ -96,10 +97,18 @@
 
 <main class="list" id="ideaList"></main>
 
-<!-- 底部录音区 -->
+<!-- 底部记录区：写文字 / 录音 / 拍照 三条入口 -->
 <div class="recordbar">
   <div class="rec-meta" id="recMeta">按住不放可以拖到项目里归档</div>
-  <button class="rec-btn" id="recBtn" aria-label="录音"><svg class="ico"><use href="#i-mic"/></svg></button>
+  <div class="rec-actions">
+    <button class="rec-alt" id="textBtn" aria-label="写文字">
+      <svg class="ico"><use href="#i-edit"/></svg><span>文字</span>
+    </button>
+    <button class="rec-btn" id="recBtn" aria-label="录音"><svg class="ico"><use href="#i-mic"/></svg></button>
+    <button class="rec-alt" id="photoBtn" aria-label="拍照">
+      <svg class="ico"><use href="#i-camera"/></svg><span>拍照</span>
+    </button>
+  </div>
 </div>
 
 <!-- 录音中浮层 -->
@@ -122,15 +131,19 @@
       <h2 id="dTitle">灵感</h2>
       <button class="icon-btn bare" data-close="detailSheet" aria-label="关闭"><svg class="ico"><use href="#i-close"/></svg></button>
     </div>
-    <div class="player">
+    <!-- 录音才有播放器；照片走下面的缩略图条 -->
+    <div class="player" id="dPlayerWrap">
       <button class="play-btn" id="dPlay" aria-label="播放"><svg class="ico"><use href="#i-play"/></svg></button>
       <input type="range" id="dSeek" min="0" max="100" value="0" step="0.1">
       <span class="time" id="dDur">00:00</span>
     </div>
+
+    <div class="shots" id="dShots" hidden></div>
+
     <input type="text" id="dName" class="field" placeholder="给这个灵感起个名字">
     <textarea id="dNote" class="field" rows="3" placeholder="补充文字备注…"></textarea>
 
-    <div class="transrow">
+    <div class="transrow" id="dTransRow">
       <button class="mini-btn" id="dTranscribe"><svg class="ico"><use href="#i-spark"/></svg>离线转写</button>
       <span class="transstatus" id="dTransStatus">不联网，在本机把录音变成文字</span>
     </div>
@@ -157,10 +170,15 @@
 
     <div class="save-strip" id="sMeta"></div>
 
+    <div id="sShotsWrap" hidden>
+      <div class="pick-label">照片</div>
+      <div class="shots" id="sShots"></div>
+    </div>
+
     <input type="text" id="sTitle" class="field" placeholder="主题，例如「登录页的动效想法」" autocomplete="off">
     <textarea id="sNote" class="field" rows="3" placeholder="补充信息（可选）"></textarea>
 
-    <div class="transrow">
+    <div class="transrow" id="sTransRow">
       <button class="mini-btn" id="sTranscribe"><svg class="ico"><use href="#i-spark"/></svg>离线转写</button>
       <span class="transstatus" id="sTransStatus">不联网，在本机把刚才说的话变成文字</span>
     </div>
@@ -363,9 +381,23 @@
     <input type="file" id="bFile" accept=".zip,.spark,application/zip" hidden>
 
     <p class="hint">
-      备份是一个 <b>.zip</b> 文件，里面有灵感清单和每段录音的原文件，在电脑上也能直接打开试听。
-      导入采用合并方式，已存在的灵感不会被覆盖。
+      备份是一个 <b>.zip</b> 文件，里面有灵感清单、每段录音和每张照片的原文件，
+      在电脑上也能直接打开。导入采用合并方式，已存在的灵感不会被覆盖。
     </p>
+  </div>
+</div>
+
+<!-- 照片全屏查看 -->
+<div class="viewer" id="shotViewer" hidden>
+  <button class="icon-btn bare viewer-x" id="shotClose" aria-label="关闭"><svg class="ico"><use href="#i-close"/></svg></button>
+  <img id="shotImg" alt="">
+  <div class="viewer-bar">
+    <span id="shotCount">1 / 1</span>
+    <span id="shotInfo"></span>
+  </div>
+  <div class="shot-nav" id="shotNav" hidden>
+    <button class="icon-btn bare" id="shotPrev" aria-label="上一张"><svg class="ico flip"><use href="#i-go"/></svg></button>
+    <button class="icon-btn bare" id="shotNext" aria-label="下一张"><svg class="ico"><use href="#i-go"/></svg></button>
   </div>
 </div>
 
@@ -376,6 +408,7 @@
 <script src="js/zip.js"></script>
 <script src="js/backup.js"></script>
 <script src="js/recorder.js"></script>
+<script src="js/image.js"></script>
 <script src="js/speech.js"></script>
 <script src="js/summarize.js"></script>
 <script src="js/commands.js"></script>
