@@ -123,10 +123,45 @@
     </div>
     <input type="text" id="dName" class="field" placeholder="给这个灵感起个名字">
     <textarea id="dNote" class="field" rows="3" placeholder="补充文字备注…"></textarea>
+
+    <div class="transrow">
+      <button class="mini-btn" id="dTranscribe"><svg class="ico"><use href="#i-spark"/></svg>离线转写</button>
+      <span class="transstatus" id="dTransStatus">不联网，在本机把录音变成文字</span>
+    </div>
+
     <div class="meta" id="dMeta"></div>
     <div class="sheet-actions">
       <button class="ghost-btn" id="dMove">移动到…</button>
       <button class="danger-btn" id="dDelete">删除</button>
+    </div>
+  </div>
+</div>
+
+<!-- 保存灵感：先把主题和信息补上，再落库 -->
+<div class="sheet" id="saveSheet" hidden>
+  <div class="sheet-card">
+    <div class="grabber"></div>
+    <div class="sheet-head">
+      <h2>保存灵感</h2>
+      <button class="icon-btn bare" id="sClose" aria-label="关闭"><svg class="ico"><use href="#i-close"/></svg></button>
+    </div>
+
+    <div class="save-strip" id="sMeta"></div>
+
+    <input type="text" id="sTitle" class="field" placeholder="主题，例如「登录页的动效想法」" autocomplete="off">
+    <textarea id="sNote" class="field" rows="3" placeholder="补充信息（可选）"></textarea>
+
+    <div class="transrow">
+      <button class="mini-btn" id="sTranscribe"><svg class="ico"><use href="#i-spark"/></svg>离线转写</button>
+      <span class="transstatus" id="sTransStatus">不联网，在本机把刚才说的话变成文字</span>
+    </div>
+
+    <div class="pick-label">归档到</div>
+    <div class="chip-row" id="sProjects"></div>
+
+    <div class="sheet-actions">
+      <button class="ghost-btn" id="sDiscard">丢弃</button>
+      <button class="solid-btn" id="sSave">保存</button>
     </div>
   </div>
 </div>
@@ -191,6 +226,7 @@
 <script src="js/zip.js"></script>
 <script src="js/backup.js"></script>
 <script src="js/recorder.js"></script>
+<script src="js/speech.js"></script>
 <script src="js/dnd.js"></script>
 <script src="js/app.js"></script>
 </body>

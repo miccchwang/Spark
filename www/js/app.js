@@ -11,6 +11,8 @@
     currentId: null,
     newIcon: 'bulb',
     delArmed: false,
+    pending: null,        // a finished recording waiting for its topic, not yet persisted
+    speech: null,         // result of the offline recogniser probe
   };
 
   const $ = (s) => document.querySelector(s);
@@ -490,6 +492,7 @@
   }
 
   async function startRecording() {
+    if (S.pending) { toast('先把上一条灵感存好'); return; }
     if (!window.Rec.isSupported()) { toast('这个环境不支持录音'); return; }
     try {
       await window.Rec.start(onLevel);
@@ -528,28 +531,9 @@
     const loc = await locPromise;
     if (!out.blob || out.blob.size < 500) { toast('录音太短，已丢弃'); return; }
 
-    const id = window.DB.uid();
-    await window.DB.put('audio', { id, blob: out.blob, mime: out.mime });
-    const idea = {
-      id,
-      projectId: S.view === 'inbox' ? null : S.view,
-      title: '',
-      note: '',
-      durationMs: out.durationMs,
-      createdAt: Date.now(),
-      lat: loc ? loc.lat : null,
-      lon: loc ? loc.lon : null,
-    };
-    await window.DB.put('ideas', idea);
-    S.ideas.push(idea);
-    render();
-
-    const card = document.querySelector('.card[data-id="' + id + '"]');
-    if (card) {
-      card.classList.add('flash');
-      card.scrollIntoView({ block: 'center', behavior: 'smooth' });
-    }
-    toast(loc ? '已保存 · 含位置信息' : '已保存 · 未取得位置');
+    // Nothing is written yet. The save sheet collects the topic first, so a recording the
+    // user walks away from never lands in the database.
+    openSaveSheet(out, loc);
   }
 
   async function cancelRecording() {
@@ -557,6 +541,160 @@
     clearInterval(recInterval);
     $('#recPanel').hidden = true;
     toast('已丢弃');
+  }
+
+  /* ---------------- save sheet: topic before the idea is stored ---------------- */
+
+  function openSaveSheet(out, loc) {
+    S.pending = {
+      blob: out.blob,
+      mime: out.mime,
+      durationMs: out.durationMs,
+      lat: loc ? loc.lat : null,
+      lon: loc ? loc.lon : null,
+      projectId: S.view === 'inbox' ? null : S.view,
+    };
+
+    $('#sTitle').value = '';
+    $('#sNote').value = '';
+    $('#sMeta').innerHTML =
+      metaRow('clock', fmtWhen(Date.now())) +
+      metaRow('pin', S.pending.lat == null
+        ? '未记录位置'
+        : S.pending.lat.toFixed(4) + ', ' + S.pending.lon.toFixed(4)) +
+      metaRow('timer', '时长 ' + fmtDur(S.pending.durationMs));
+
+    renderSaveProjects();
+    resetTransStatus($('#sTransStatus'));
+    $('#saveSheet').hidden = false;
+    setTimeout(() => $('#sTitle').focus(), 150);
+  }
+
+  function renderSaveProjects() {
+    const box = $('#sProjects');
+    box.innerHTML = '';
+    const opts = [{ id: null, name: '收件箱', icon: 'tray' }].concat(S.projects);
+    opts.forEach((p) => {
+      const here = (S.pending.projectId || null) === p.id;
+      const b = document.createElement('button');
+      b.type = 'button';
+      if (here) b.classList.add('sel');
+      b.innerHTML = icon(p.icon || 'tray') + '<span></span>';
+      b.querySelector('span').textContent = p.name;
+      b.addEventListener('click', () => {
+        S.pending.projectId = p.id;
+        renderSaveProjects();
+      });
+      box.appendChild(b);
+    });
+  }
+
+  async function commitSave() {
+    const pend = S.pending;
+    if (!pend) return;
+
+    const id = window.DB.uid();
+    await window.DB.put('audio', { id, blob: pend.blob, mime: pend.mime });
+
+    const idea = {
+      id,
+      projectId: pend.projectId || null,
+      title: $('#sTitle').value.trim(),
+      note: $('#sNote').value.trim(),
+      durationMs: pend.durationMs,
+      createdAt: Date.now(),
+      lat: pend.lat,
+      lon: pend.lon,
+    };
+    await window.DB.put('ideas', idea);
+
+    S.ideas.push(idea);
+    S.pending = null;
+    $('#saveSheet').hidden = true;
+    render();
+
+    const card = document.querySelector('.card[data-id="' + id + '"]');
+    if (card) {
+      card.classList.add('flash');
+      card.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    }
+    const where = idea.projectId ? '「' + projName(idea.projectId) + '」' : '收件箱';
+    toast('已存到' + where + (idea.lat == null ? ' · 无位置' : ' · 含位置'));
+  }
+
+  async function discardPending() {
+    if (!S.pending) return;
+    await window.Speech.cancel();
+    S.pending = null;
+    $('#saveSheet').hidden = true;
+    resetTransStatus($('#sTransStatus'));
+    toast('已丢弃');
+  }
+
+  /* ---------------- offline transcription ---------------- */
+
+  const TRANS_ICON = '<svg class="ico"><use href="#i-spark"/></svg>';
+  let transBusy = false;
+
+  function setTransStatus(el, text, busy) {
+    el.textContent = text;
+    el.classList.toggle('busy', !!busy);
+  }
+
+  function resetTransStatus(el) {
+    const ok = S.speech && S.speech.ok;
+    setTransStatus(el, ok ? '不联网，在本机把录音变成文字' : ((S.speech && S.speech.reason) || '正在检查离线识别引擎…'), false);
+  }
+
+  function applySpeechSupport() {
+    const ok = !!(S.speech && S.speech.ok);
+    [$('#dTranscribe'), $('#sTranscribe')].forEach((b) => {
+      b.disabled = !ok;
+      b.innerHTML = TRANS_ICON + '离线转写';
+    });
+    resetTransStatus($('#dTransStatus'));
+    resetTransStatus($('#sTransStatus'));
+  }
+
+  /**
+   * Runs the recogniser over a recorded blob and hands the text to onText(text, streaming).
+   * Nothing leaves the device — see js/speech.js.
+   */
+  async function transcribeBlob(blob, btn, status, onText) {
+    if (!(S.speech && S.speech.ok)) { toast((S.speech && S.speech.reason) || '离线转写不可用'); return; }
+    if (transBusy) { toast('正在转写，稍等一下'); return; }
+
+    transBusy = true;
+    btn.disabled = true;
+    const t0 = Date.now();
+
+    window.Speech.onProgress((d) => {
+      setTransStatus(status, '首次使用，正在把语音模型装进本机… ' + (d.megabytes || 0) + ' MB', true);
+    });
+
+    try {
+      setTransStatus(status, '正在识别…', true);
+      const text = await window.Speech.transcribe(blob, {
+        onUpdate: (u) => {
+          const done = Math.round(u.done / 16000);
+          const all = Math.round(u.total / 16000);
+          setTransStatus(status, '正在识别… ' + done + ' / ' + all + ' 秒', true);
+          const live = (u.text + u.partial).trim();
+          if (live) onText(live, true);
+        },
+      });
+      if (text) {
+        onText(text, false);
+        setTransStatus(status, '转写完成 · 用时 ' + fmtDur(Date.now() - t0), false);
+      } else {
+        setTransStatus(status, '没听清内容，靠麦克风近一点再试一次', false);
+      }
+    } catch (e) {
+      setTransStatus(status, '转写失败：' + ((e && e.message) || '未知错误'), false);
+    } finally {
+      transBusy = false;
+      btn.disabled = false;
+    }
   }
 
   /* ---------------- backup & storage ---------------- */
@@ -685,6 +823,33 @@
     $('#dMove').addEventListener('click', openMoveSheet);
     $('#dDelete').addEventListener('click', deleteIdea);
 
+    $('#dTranscribe').addEventListener('click', async () => {
+      const i = findIdea(S.currentId);
+      if (!i) return;
+      const rec = await window.DB.get('audio', i.id);
+      if (!rec || !rec.blob) { toast('这段录音已丢失'); return; }
+      transcribeBlob(rec.blob, $('#dTranscribe'), $('#dTransStatus'), (text, streaming) => {
+        $('#dNote').value = text;
+        if (!streaming) saveDetailFields();
+      });
+    });
+
+    $('#sSave').addEventListener('click', commitSave);
+    $('#sDiscard').addEventListener('click', discardPending);
+    $('#sClose').addEventListener('click', discardPending);
+    $('#sTitle').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') { e.preventDefault(); commitSave(); }
+    });
+    $('#sTranscribe').addEventListener('click', () => {
+      if (!S.pending) return;
+      const base = $('#sNote').value.trim();
+      transcribeBlob(S.pending.blob, $('#sTranscribe'), $('#sTransStatus'), (text, streaming) => {
+        $('#sNote').value = base ? base + '\n' + text : text;
+        const t = $('#sTitle');
+        if (!streaming && !t.value.trim()) t.value = text.slice(0, 18);
+      });
+    });
+
     $('#pCreate').addEventListener('click', createProject);
     $('#pName').addEventListener('keydown', (e) => { if (e.key === 'Enter') createProject(); });
 
@@ -721,7 +886,13 @@
       b.addEventListener('click', () => { $('#' + b.dataset.close).hidden = true; });
     });
     document.querySelectorAll('.sheet').forEach((s) => {
-      s.addEventListener('click', (e) => { if (e.target === s) s.hidden = true; });
+      s.addEventListener('click', (e) => {
+        if (e.target !== s) return;
+        // Tapping away from the save sheet throws the recording away, so route it through
+        // the same path as the discard button rather than just hiding the sheet.
+        if (s.id === 'saveSheet') discardPending();
+        else s.hidden = true;
+      });
     });
   }
 
@@ -738,6 +909,15 @@
     S.ideas = await window.DB.all('ideas');
     render();
     bind();
+
+    // Probe the offline recogniser once, up front, so the transcribe buttons start in the
+    // right state instead of flipping after a sheet is already open.
+    try {
+      S.speech = await window.Speech.available();
+    } catch (e) {
+      S.speech = { ok: false, reason: '离线识别引擎不可用' };
+    }
+    applySpeechSupport();
 
     // ask for durable storage; harmless if the browser declines without a gesture
     window.Backup.requestPersist();
