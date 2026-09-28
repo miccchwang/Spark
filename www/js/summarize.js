@@ -37,6 +37,13 @@ window.Summarize = (function () {
     '出现', '出来', '起来', '下去', '开始', '继续', '觉得', '认为', '知道', '发现',
     '关于', '对于', '通过', '根据', '按照', '比如', '例如', '总之', '反正', '至少',
     '第一', '第二', '第三', '最后', '同时', '目前', '当时', '总是', '经常', '偶尔',
+    // Commitment markers and relative time words. These stay in ACTION_HINT / TIME_HINT —
+    // action detection has its own lists — but as *keywords* they say nothing about what
+    // the note is about, so they are filtered out of the ranking.
+    '需要', '记得', '别忘', '还得', '想要', '要不要', '打算', '计划',
+    '今天', '明天', '后天', '昨天', '本周', '下周', '上周', '周内', '月底', '年内',
+    '尽快', '上午', '下午', '晚上', '早上', '截止', '周一', '周二', '周三', '周四',
+    '周五', '周六', '周日',
     'the', 'a', 'an', 'and', 'or', 'but', 'of', 'to', 'in', 'on', 'at', 'for', 'is',
     'are', 'was', 'were', 'be', 'been', 'it', 'this', 'that', 'with', 'as', 'by',
     'i', 'we', 'you', 'they', 'he', 'she', 'my', 'our', 'so', 'if', 'then', 'than',
@@ -57,6 +64,11 @@ window.Summarize = (function () {
     '测试', '上线', '发布', '整理', '准备', '讨论', '申请', '提交', '要跟', '要对',
     '要把', '要去', '要做', '要先', '还得', '想要', '要', 'todo', 'fix', 'add',
     'check', 'send', 'review', 'ship', 'follow',
+    // change verbs: the work is stated as "make X into Y", which is a commitment even when
+    // no deadline is mentioned
+    '统一', '调整', '优化', '重构', '清理', '补充', '完善', '更新', '替换', '拆分',
+    '合并', '迁移', '简化', '落地', '推进', '对齐', '拉齐', '评估', '调研', '排查',
+    '定位', '复现', '验收', '核对', '复盘', '记录', '梳理', '汇总',
   ];
   /* 要 on its own means "need to", but it is also a component of 需要/重要/主要/只要,
      which are not commitments. Rather than drop it, exclude it when it follows one of

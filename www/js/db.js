@@ -1,8 +1,11 @@
 /* Spark — IndexedDB storage layer.
-   stores: projects, ideas, audio (audio kept separate so lists stay light). */
+   stores: projects, ideas, todos, audio (audio kept separate so lists stay light). */
 window.DB = (function () {
   const NAME = 'spark';
-  const VER = 1;
+  /* v2 adds todos. Records carry ownerId/groupId/updatedAt/rev from the start even though
+     the local edition leaves them null, so switching an install to the online edition does
+     not need another migration. */
+  const VER = 2;
   let dbp = null;
 
   function open() {
@@ -19,8 +22,21 @@ window.DB = (function () {
           s.createIndex('projectId', 'projectId');
           s.createIndex('createdAt', 'createdAt');
         }
+        if (!db.objectStoreNames.contains('todos')) {
+          const s = db.createObjectStore('todos', { keyPath: 'id' });
+          s.createIndex('done', 'done');
+          s.createIndex('createdAt', 'createdAt');
+          s.createIndex('ideaId', 'ideaId');
+          s.createIndex('projectId', 'projectId');
+        }
         if (!db.objectStoreNames.contains('audio')) {
           db.createObjectStore('audio', { keyPath: 'id' });
+        }
+        if (!db.objectStoreNames.contains('messages')) {
+          // Discussion threads live offline too, so a thread read on the train still reads.
+          const s = db.createObjectStore('messages', { keyPath: 'id' });
+          s.createIndex('threadId', 'threadId');
+          s.createIndex('createdAt', 'createdAt');
         }
       };
       req.onsuccess = () => resolve(req.result);

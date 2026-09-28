@@ -3,7 +3,8 @@
   const S = {
     projects: [],
     ideas: [],
-    view: 'inbox',        // 'inbox' | project id
+    todos: [],
+    view: 'inbox',        // 'inbox' | 'todos' | project id
     query: '',
     theme: 'dark',
     audioEl: null,
@@ -13,6 +14,7 @@
     delArmed: false,
     pending: null,        // a finished recording waiting for its topic, not yet persisted
     speech: null,         // result of the offline recogniser probe
+    distill: null,        // the payload currently shown in the distill sheet
   };
 
   const $ = (s) => document.querySelector(s);
@@ -57,6 +59,19 @@
   const projName = (id) => (S.projects.find((p) => p.id === id) || {}).name || '收件箱';
   const countIn = (pid) => S.ideas.filter((i) => (i.projectId || null) === pid).length;
 
+  const findTodo = (id) => S.todos.find((t) => t.id === id);
+  const openTodos = () => S.todos.filter((t) => !t.done);
+  const ideaText = (i) => [i.title, i.note].filter(Boolean).join('。');
+
+  /* Distillation ranks terms against the user's own corpus, so the IDF table is rebuilt
+     whenever the ideas change and reused across every render in between. */
+  let idfCache = null;
+  function corpusIdf() {
+    if (!idfCache) idfCache = window.Summarize.buildIdf(S.ideas.map(ideaText));
+    return idfCache;
+  }
+  function invalidateCorpus() { idfCache = null; }
+
   let toastTimer = 0;
   function toast(msg) {
     const t = $('#toast');
@@ -87,10 +102,19 @@
   }
 
   function renderHeader() {
+    const distillBtn = $('#distillBtn');
+    if (S.view === 'todos') {
+      $('#viewTitle').textContent = '待办';
+      $('#viewSub').textContent = openTodos().length + ' / ' + S.todos.length + ' 项';
+      $('#recMeta').textContent = '录音仍然存成灵感，提炼后可以一键转成待办';
+      distillBtn.hidden = true;
+      return;
+    }
+    distillBtn.hidden = false;
+
     const isInbox = S.view === 'inbox';
     $('#viewTitle').textContent = isInbox ? '收件箱' : projName(S.view);
-    const n = visibleIdeas().length;
-    $('#viewSub').textContent = n + ' 个灵感';
+    $('#viewSub').textContent = visibleIdeas().length + ' 个灵感';
     $('#recMeta').textContent = isInbox
       ? '长按卡片可拖到上方项目归档'
       : '新录音会存进「' + projName(S.view) + '」';
@@ -112,6 +136,7 @@
     const rail = $('#projectRail');
     rail.innerHTML = '';
     rail.appendChild(makeChip({ drop: 'inbox', label: '收件箱', icon: 'tray', count: countIn(null), active: S.view === 'inbox' }));
+    rail.appendChild(makeChip({ drop: 'todos', label: '待办', icon: 'check', count: openTodos().length, active: S.view === 'todos' }));
     S.projects.forEach((p) => {
       rail.appendChild(makeChip({ drop: p.id, label: p.name, icon: iconOf(p), count: countIn(p.id), active: S.view === p.id, project: p }));
     });
@@ -125,6 +150,8 @@
   function renderList() {
     const list = $('#ideaList');
     list.innerHTML = '';
+    if (S.view === 'todos') { renderTodos(list); return; }
+
     const items = visibleIdeas();
     if (!items.length) {
       const e = document.createElement('div');
@@ -409,7 +436,10 @@
     if (!i) return;
     i.title = $('#dName').value.trim();
     i.note = $('#dNote').value;
+    i.updatedAt = Date.now();
+    i.rev = (i.rev || 1) + 1;
     await window.DB.put('ideas', i);
+    invalidateCorpus();
     render();
   }
 
@@ -426,6 +456,7 @@
     await window.DB.del('ideas', i.id);
     await window.DB.del('audio', i.id);
     S.ideas = S.ideas.filter((x) => x.id !== i.id);
+    invalidateCorpus();
     $('#detailSheet').hidden = true;
     render();
     toast('已删除');
@@ -609,6 +640,7 @@
     await window.DB.put('ideas', idea);
 
     S.ideas.push(idea);
+    invalidateCorpus();
     S.pending = null;
     $('#saveSheet').hidden = true;
     render();
@@ -697,6 +729,286 @@
     }
   }
 
+  /* ---------------- todos ---------------- */
+
+  /* Records carry the online-edition fields (ownerId/groupId/rev) as nulls from the start
+     so turning on sync later does not need a second migration. */
+  function blankTodo(text, opts) {
+    const o = opts || {};
+    const now = Date.now();
+    return {
+      id: window.DB.uid(),
+      text: String(text || '').trim(),
+      done: false,
+      doneAt: null,
+      ideaId: o.ideaId || null,
+      projectId: o.projectId === undefined ? null : o.projectId,
+      due: o.due || '',
+      dueAt: o.dueAt || null,
+      source: o.source || 'manual',
+      createdAt: now,
+      updatedAt: now,
+      ownerId: null,
+      groupId: null,
+      rev: 1,
+    };
+  }
+
+  async function addTodo(text, opts) {
+    const todo = blankTodo(text, opts);
+    if (!todo.text) return null;
+    await window.DB.put('todos', todo);
+    S.todos.push(todo);
+    if (S.view === 'todos') render();
+    else renderHeader();
+    return todo;
+  }
+
+  async function toggleTodo(id) {
+    const t = findTodo(id);
+    if (!t) return;
+    t.done = !t.done;
+    t.doneAt = t.done ? Date.now() : null;
+    t.updatedAt = Date.now();
+    t.rev = (t.rev || 1) + 1;
+    await window.DB.put('todos', t);
+    render();
+  }
+
+  async function deleteTodo(id) {
+    await window.DB.del('todos', id);
+    S.todos = S.todos.filter((t) => t.id !== id);
+    render();
+    toast('待办已删除');
+  }
+
+  function todoOrder(a, b) {
+    if (a.dueAt && b.dueAt) return a.dueAt - b.dueAt;
+    if (a.dueAt) return -1;
+    if (b.dueAt) return 1;
+    return b.createdAt - a.createdAt;
+  }
+
+  function makeTodoRow(t) {
+    const el = document.createElement('div');
+    el.className = 'todo' + (t.done ? ' done' : '');
+    el.dataset.id = t.id;
+
+    const tick = document.createElement('button');
+    tick.className = 'tick';
+    tick.setAttribute('aria-label', t.done ? '标记为未完成' : '标记为完成');
+    tick.innerHTML = icon('check');
+    tick.addEventListener('click', (e) => { e.stopPropagation(); toggleTodo(t.id); });
+
+    const body = document.createElement('div');
+    body.className = 'todo-body';
+
+    const text = document.createElement('p');
+    text.className = 'todo-text';
+    text.textContent = t.text;
+    body.appendChild(text);
+
+    const meta = document.createElement('div');
+    meta.className = 'todo-meta';
+    if (t.due) {
+      const d = document.createElement('span');
+      d.innerHTML = icon('clock', 'sm');
+      const v = document.createElement('span');
+      v.textContent = t.due;
+      d.appendChild(v);
+      meta.appendChild(d);
+    }
+    if (t.ideaId) {
+      const src = document.createElement('span');
+      src.className = 't-src';
+      const i = findIdea(t.ideaId);
+      src.textContent = '来自「' + ((i && i.title) || '未命名灵感') + '」';
+      meta.appendChild(src);
+    }
+    if (meta.childNodes.length) body.appendChild(meta);
+
+    el.append(tick, body);
+    el.addEventListener('click', () => {
+      const i = t.ideaId ? findIdea(t.ideaId) : null;
+      showActions(t.text.slice(0, 24), [
+        { label: t.done ? '标记为未完成' : '标记为完成', icon: 'check', run: () => toggleTodo(t.id) },
+        ...(i ? [{ label: '打开来源灵感', icon: 'spark', run: () => openDetail(i.id) }] : []),
+        { label: '删除待办', icon: 'trash', run: () => deleteTodo(t.id) },
+        { label: '取消' },
+      ]);
+    });
+    return el;
+  }
+
+  function renderTodos(box) {
+    const add = document.createElement('button');
+    add.className = 'todo-add';
+    add.innerHTML = icon('plus') + '<span>添加待办</span>';
+    add.addEventListener('click', () => {
+      const text = prompt('待办内容');
+      if (text && text.trim()) addTodo(text.trim(), { source: 'manual' });
+    });
+    box.appendChild(add);
+
+    if (!S.todos.length) {
+      const e = document.createElement('div');
+      e.className = 'empty';
+      e.innerHTML = icon('check', 'lg big') +
+        '还没有待办<br>可以直接添加，也可以在灵感里提炼要点后一键转过来';
+      box.appendChild(e);
+      return;
+    }
+
+    const open = S.todos.filter((t) => !t.done).sort(todoOrder);
+    const done = S.todos.filter((t) => t.done).sort((a, b) => (b.doneAt || 0) - (a.doneAt || 0));
+
+    [['待完成 · ' + open.length, open], ['已完成 · ' + done.length, done]].forEach(([label, items]) => {
+      if (!items.length) return;
+      const group = document.createElement('div');
+      group.className = 'todo-group';
+      const h = document.createElement('div');
+      h.className = 'group-label';
+      h.textContent = label;
+      group.appendChild(h);
+      items.forEach((t) => group.appendChild(makeTodoRow(t)));
+      box.appendChild(group);
+    });
+  }
+
+  /* ---------------- distill (offline, deterministic) ---------------- */
+
+  function distillScope(scope) {
+    if (scope.kind === 'idea') {
+      const i = findIdea(scope.ideaId);
+      if (!i) return null;
+      const text = ideaText(i);
+      if (!text) return null;
+      return {
+        ideaId: i.id,
+        projectId: i.projectId || null,
+        label: i.title || '未命名灵感',
+        title: '提炼要点',
+        payload: window.Summarize.summarize(text, {
+          idf: corpusIdf(),
+          boost: new Set(window.Summarize.terms(i.title || '')),
+        }),
+      };
+    }
+
+    const pid = scope.projectId === undefined ? null : scope.projectId;
+    const list = S.ideas.filter((i) => (i.projectId || null) === pid && ideaText(i));
+    if (!list.length) return null;
+    return {
+      ideaId: null,
+      projectId: pid,
+      label: pid ? projName(pid) : '收件箱',
+      title: '项目汇总',
+      payload: window.Summarize.rollup(list),
+    };
+  }
+
+  function openDistill(scope) {
+    const d = distillScope(scope);
+    if (!d) { toast('这里还没有可提炼的文字'); return; }
+
+    const existing = new Set(S.todos.map((t) => t.text));
+    S.distill = { ...d, added: new Set() };
+
+    $('#gTitle').textContent = d.title;
+    if (scope.kind === 'idea') {
+      const i = findIdea(scope.ideaId);
+      $('#gScope').textContent = d.label + ' · ' + fmtWhen(i.createdAt);
+    } else {
+      $('#gScope').textContent = d.label + ' · ' + d.payload.count + ' 条灵感';
+    }
+
+    const kw = $('#gKeywords');
+    kw.innerHTML = '';
+    if (!d.payload.keywords.length) {
+      kw.innerHTML = '<span class="kw muted">没有提取到关键词</span>';
+    } else {
+      d.payload.keywords.forEach((k, n) => {
+        const c = document.createElement('span');
+        c.className = 'kw' + (n < 3 ? ' top' : '');
+        c.textContent = k.term;
+        kw.appendChild(c);
+      });
+    }
+
+    const dl = $('#gDigest');
+    dl.innerHTML = '';
+    if (!d.payload.digest.length) {
+      dl.innerHTML = '<p class="hint">内容太短，没有可以摘出来的句子。</p>';
+    } else {
+      d.payload.digest.forEach((s, n) => {
+        const row = document.createElement('div');
+        row.className = 'digest-line';
+        const idx = document.createElement('span');
+        idx.className = 'n';
+        idx.textContent = pad(n + 1);
+        const p = document.createElement('p');
+        p.textContent = s;
+        row.append(idx, p);
+        dl.appendChild(row);
+      });
+    }
+
+    const al = $('#gActions');
+    al.innerHTML = '';
+    if (!d.payload.actions.length) {
+      al.innerHTML = '<p class="hint">没有识别到明确的待办。需要出现动作词，并且带时间或第二个动作词。</p>';
+    } else {
+      d.payload.actions.forEach((a) => {
+        const row = document.createElement('div');
+        row.className = 'action-row';
+
+        const p = document.createElement('p');
+        p.textContent = a.text;
+        row.appendChild(p);
+
+        const foot = document.createElement('div');
+        foot.className = 'action-foot';
+
+        if (a.due) {
+          const due = document.createElement('span');
+          due.className = 'action-due';
+          due.innerHTML = icon('clock', 'sm');
+          const v = document.createElement('span');
+          v.textContent = a.due;
+          due.appendChild(v);
+          foot.appendChild(due);
+        } else {
+          const spacer = document.createElement('span');
+          spacer.className = 'action-due';
+          foot.appendChild(spacer);
+        }
+
+        const btn = document.createElement('button');
+        btn.className = 'mini-btn';
+        const already = existing.has(a.text);
+        btn.textContent = already ? '已在待办' : '转成待办';
+        btn.disabled = already;
+        btn.addEventListener('click', async () => {
+          await addTodo(a.text, {
+            source: 'extracted',
+            due: a.due || '',
+            ideaId: d.ideaId,
+            projectId: d.projectId,
+          });
+          btn.textContent = '已在待办';
+          btn.disabled = true;
+          toast('已加入待办');
+        });
+        foot.appendChild(btn);
+
+        row.appendChild(foot);
+        al.appendChild(row);
+      });
+    }
+
+    $('#distillSheet').hidden = false;
+  }
+
   /* ---------------- backup & storage ---------------- */
   async function renderStats() {
     const grid = $('#statGrid');
@@ -777,6 +1089,8 @@
       const r = await window.Backup.importZip(file);
       S.projects = await window.DB.all('projects');
       S.ideas = await window.DB.all('ideas');
+      S.todos = await window.DB.all('todos');
+      invalidateCorpus();
       render();
       await renderStats();
       if (r.added.ideas || r.added.projects || r.added.audio) {
@@ -832,6 +1146,15 @@
         $('#dNote').value = text;
         if (!streaming) saveDetailFields();
       });
+    });
+
+    $('#dDistill').addEventListener('click', () => {
+      if (S.currentId) openDistill({ kind: 'idea', ideaId: S.currentId });
+    });
+
+    $('#distillBtn').addEventListener('click', () => {
+      // Inbox rolls up everything unfiled; a project rolls up its own ideas.
+      openDistill({ kind: 'project', projectId: S.view === 'inbox' ? null : S.view });
     });
 
     $('#sSave').addEventListener('click', commitSave);
@@ -907,6 +1230,8 @@
     await window.DB.open();
     S.projects = await window.DB.all('projects');
     S.ideas = await window.DB.all('ideas');
+    S.todos = await window.DB.all('todos');
+    invalidateCorpus();
     render();
     bind();
 

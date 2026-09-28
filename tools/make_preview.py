@@ -32,7 +32,8 @@ def main():
     html = html.replace('assets/brand/app-icon-180.png', touch)
     html = html.replace('assets/brand/app-icon-32.png', icon32)
 
-    for name in ('db.js', 'zip.js', 'backup.js', 'recorder.js', 'speech.js', 'dnd.js', 'app.js'):
+    for name in ('db.js', 'zip.js', 'backup.js', 'recorder.js', 'speech.js',
+                 'summarize.js', 'dnd.js', 'app.js'):
         src = open(os.path.join(WWW, 'js', name)).read()
         html = html.replace(f'<script src="js/{name}"></script>', f'<script>\n{src}\n</script>')
 
