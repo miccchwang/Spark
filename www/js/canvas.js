@@ -230,19 +230,37 @@ window.Canvas = (function () {
       const bow = Math.min(28, len * 0.12);
       const cx = mx + (nx / len) * bow;
       const cy = my + (ny / len) * bow;
+      // The head's direction is the curve's tangent at its end. For a quadratic that is the
+      // control point -> endpoint vector; using p1 -> p2 instead would aim every head at the
+      // destination's centre and make a bowed edge look like it misses.
+      const ang = Math.atan2(p2.y - cy, p2.x - cx);
+      const ux = Math.cos(ang);
+      const uy = Math.sin(ang);
+      // Stop the line just short of the tip. stroke-linecap is round, so ending the curve
+      // exactly at p2 leaves a ~1px nub poking out through the point of the arrow.
+      const ex = p2.x - ux * 2;
+      const ey = p2.y - uy * 2;
       parts.push(
         '<path d="M' + p1.x.toFixed(1) + ' ' + p1.y.toFixed(1) +
         ' Q' + cx.toFixed(1) + ' ' + cy.toFixed(1) +
-        ' ' + p2.x.toFixed(1) + ' ' + p2.y.toFixed(1) + '" />'
+        ' ' + ex.toFixed(1) + ' ' + ey.toFixed(1) + '" />'
       );
-      // a small filled head at the destination, so direction is readable
-      const ang = Math.atan2(p2.y - cy, p2.x - cx);
-      const hx = p2.x - Math.cos(ang) * 9;
-      const hy = p2.y - Math.sin(ang) * 9;
+      // A filled head at the destination, so direction is readable. Build it around the TIP:
+      // the two base corners sit HEAD_LEN back along the tangent, fanned out by ±HEAD_HALF.
+      // The tempting alternative — start at a point HEAD_LEN back along the line and then step
+      // by rotated offsets — is wrong twice over: the offsets are measured from the tip, not
+      // from the back point, so the apex ends up pointing back up the line and the whole head
+      // floats 17px short of the card with the bare line overshooting past it.
+      const HEAD_LEN = 11;
+      const HEAD_HALF = 0.42;
+      const b1x = p2.x - HEAD_LEN * Math.cos(ang - HEAD_HALF);
+      const b1y = p2.y - HEAD_LEN * Math.sin(ang - HEAD_HALF);
+      const b2x = p2.x - HEAD_LEN * Math.cos(ang + HEAD_HALF);
+      const b2y = p2.y - HEAD_LEN * Math.sin(ang + HEAD_HALF);
       parts.push(
-        '<path class="head" d="M' + hx.toFixed(1) + ' ' + hy.toFixed(1) +
-        ' l' + (-Math.cos(ang - 0.42) * 9).toFixed(1) + ' ' + (-Math.sin(ang - 0.42) * 9).toFixed(1) +
-        ' l' + (Math.cos(ang + 0.42) * 9).toFixed(1) + ' ' + (Math.sin(ang + 0.42) * 9).toFixed(1) + ' Z" />'
+        '<path class="head" d="M' + p2.x.toFixed(1) + ' ' + p2.y.toFixed(1) +
+        ' L' + b1x.toFixed(1) + ' ' + b1y.toFixed(1) +
+        ' L' + b2x.toFixed(1) + ' ' + b2y.toFixed(1) + ' Z" />'
       );
     });
     layer.innerHTML = parts.join('');

@@ -5,7 +5,11 @@
 #  - the Gradle daemon inherits the sandboxed context, so always use --no-daemon
 #  - the JVM does NOT read HTTPS_PROXY; when a proxy is needed it has to go through
 #    systemProp.* in $GRADLE_USER_HOME/gradle.properties
-#  - a foreground run gets SIGTERM'd after a few minutes; run this in the background
+#  - run this in the FOREGROUND with sandbox escalation. Do NOT reach for a background run:
+#    backgrounded commands do not inherit escalation, so Gradle fails with
+#    "Operation not permitted" even when the caller asked for no sandbox. A foreground run
+#    that overruns its timeout is auto-backgrounded and KEEPS its escalation, which is the
+#    behaviour you want.
 #  - the wrapper jar resolves fine, but the distribution itself was fetched by hand into
 #    ~/gradle-dist, so GRADLE_USER_HOME is pinned to the cache that already holds every
 #    dependency. Changing it means re-downloading the whole toolchain.
