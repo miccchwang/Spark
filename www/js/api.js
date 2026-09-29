@@ -197,6 +197,42 @@ window.Api = (function () {
     return update('profiles', { id: 'eq.' + u.id }, patch);
   };
 
+  /* ---------------- file upload ---------------- */
+
+  /**
+   * POST a multipart body to an edge function.
+   *
+   * Content-Type is deliberately absent from the headers: the browser has to set it itself
+   * so the multipart boundary in the header matches the one it wrote into the body. Sending
+   * authHeaders() here would pin the type to application/json and the function would see an
+   * empty form.
+   */
+  async function upload(path, form) {
+    if (!isConfigured()) throw new Error('还没有配置后端地址');
+    await ensureFresh();
+    const h = { apikey: cfg.anonKey };
+    if (session && session.access_token) h.Authorization = 'Bearer ' + session.access_token;
+    const res = await fetch(cfg.url + path, { method: 'POST', headers: h, body: form });
+    if (!res.ok) throw await readError(res);
+    const text = await res.text();
+    return text ? JSON.parse(text) : null;
+  }
+
+  /**
+   * Send a recording to the transcribe function and get the text back.
+   *
+   * The compressed recording is uploaded as-is. There is no decode-and-resample step any
+   * more: that existed only to satisfy the bundled recogniser's demand for 16 kHz mono PCM,
+   * and it made the upload roughly four times bigger than it needed to be.
+   */
+  function transcribeAudio(blob, opts) {
+    const o = opts || {};
+    const form = new FormData();
+    form.append('file', blob, o.filename || 'audio.webm');
+    if (o.lang) form.append('lang', o.lang);
+    return upload('/functions/v1/transcribe', form);
+  }
+
   /* ---------------- domain helpers ---------------- */
 
   const myContacts = () =>
@@ -285,6 +321,8 @@ window.Api = (function () {
     update,
     remove,
     rpc,
+    upload,
+    transcribeAudio,
     updateProfile,
     myContacts,
     myGroups,

@@ -13,7 +13,4 @@ ext {
     androidxJunitVersion = '1.3.0'
     androidxEspressoCoreVersion = '3.7.0'
     cordovaAndroidVersion = '14.0.1'
-    // Offline speech recognition engine. Ships libvosk.so for every ABI plus the Kaldi
-    // bindings; the language models are bundled separately under src/main/assets.
-    voskVersion = '0.3.47'
 }

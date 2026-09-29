@@ -4,9 +4,10 @@
    recording and photo as a normal file. */
 window.Backup = (function () {
   const FORMAT = 'spark-backup';
-  /* v2 adds images/. v1 archives still import: their images.json is simply absent, and
-     every idea in them is a recording anyway. */
-  const VERSION = 2;
+  /* v2 adds images/. v3 adds the canvas: boards.json, nodes.json and edges.json.
+     Older archives still import. A file that is not there is read as an empty list, which is
+     exactly right — a v1 backup had no photos, and a v2 one had no boards. */
+  const VERSION = 3;
 
   /* ---------------- helpers ---------------- */
   function extFor(mime) {
@@ -68,17 +69,20 @@ window.Backup = (function () {
 
   /* ---------------- export ---------------- */
   async function collect() {
-    const [projects, ideas, audio, images] = await Promise.all([
+    const [projects, ideas, audio, images, boards, nodes, edges] = await Promise.all([
       window.DB.all('projects'),
       window.DB.all('ideas'),
       window.DB.all('audio'),
       window.DB.all('images'),
+      window.DB.all('boards'),
+      window.DB.all('nodes'),
+      window.DB.all('edges'),
     ]);
-    return { projects, ideas, audio, images };
+    return { projects, ideas, audio, images, boards, nodes, edges };
   }
 
   async function buildBlob() {
-    const { projects, ideas, audio, images } = await collect();
+    const { projects, ideas, audio, images, boards, nodes, edges } = await collect();
     const audioIndex = [];
     const imageIndex = [];
     const entries = [];
@@ -127,6 +131,9 @@ window.Backup = (function () {
         ideas: ideas.length,
         audio: audioIndex.length,
         images: imageIndex.length,
+        boards: boards.length,
+        nodes: nodes.length,
+        edges: edges.length,
       },
       missingAudio: missing,
     };
@@ -136,7 +143,7 @@ window.Backup = (function () {
       '',
       '导出时间：' + now.toLocaleString(),
       '灵感 ' + ideas.length + ' 条 · 项目 ' + projects.length + ' 个 · 录音 ' + audioIndex.length +
-        ' 段 · 照片 ' + imageIndex.length + ' 张',
+        ' 段 · 照片 ' + imageIndex.length + ' 张 · 画布 ' + boards.length + ' 块',
       '',
       '目录说明',
       '  manifest.json  备份信息与统计',
@@ -146,6 +153,9 @@ window.Backup = (function () {
       '  audio/         每段录音的原文件，可直接双击播放',
       '  images.json    照片索引（id / 所属灵感 / 文件名 / 尺寸 / 大小）',
       '  images/        每张照片的原文件，可直接双击查看',
+      '  boards.json    画布列表（名称、上次打开的位置）',
+      '  nodes.json     画布上的卡片（坐标、文字，或引用哪条灵感 / 待办）',
+      '  edges.json     卡片之间的连线',
       '',
       '在 Spark 中「从备份导入」即可还原。导入采用合并方式，',
       '已存在的灵感不会被覆盖或重复。',
@@ -159,6 +169,9 @@ window.Backup = (function () {
       { name: 'ideas.json', data: JSON.stringify(ideas, null, 2) },
       { name: 'audio.json', data: JSON.stringify(audioIndex, null, 2) },
       { name: 'images.json', data: JSON.stringify(imageIndex, null, 2) },
+      { name: 'boards.json', data: JSON.stringify(boards, null, 2) },
+      { name: 'nodes.json', data: JSON.stringify(nodes, null, 2) },
+      { name: 'edges.json', data: JSON.stringify(edges, null, 2) },
     ].concat(entries);
 
     const bytes = window.Zip.write(all, now);
@@ -218,20 +231,26 @@ window.Backup = (function () {
     const inAudio = byName.get('audio.json') ? json(byName.get('audio.json').data) : [];
     // Absent in a v1 archive, which is fine: it had no photos.
     const inImages = byName.get('images.json') ? json(byName.get('images.json').data) : [];
+    // Absent before v3: no boards, no cards, no lines.
+    const inBoards = byName.get('boards.json') ? json(byName.get('boards.json').data) : [];
+    const inNodes = byName.get('nodes.json') ? json(byName.get('nodes.json').data) : [];
+    const inEdges = byName.get('edges.json') ? json(byName.get('edges.json').data) : [];
 
-    const [haveProjects, haveIdeas, haveAudio, haveImages] = await Promise.all([
+    const [haveProjects, haveIdeas, haveAudio, haveImages, haveBoards] = await Promise.all([
       window.DB.all('projects'),
       window.DB.all('ideas'),
       window.DB.all('audio'),
       window.DB.all('images'),
+      window.DB.all('boards'),
     ]);
     const projectIds = new Set(haveProjects.map((p) => p.id));
     const ideaIds = new Set(haveIdeas.map((i) => i.id));
     const audioIds = new Set(haveAudio.map((a) => a.id));
     const imageIds = new Set(haveImages.map((a) => a.id));
+    const boardIds = new Set(haveBoards.map((b) => b.id));
 
-    const added = { projects: 0, ideas: 0, audio: 0, images: 0 };
-    const skipped = { projects: 0, ideas: 0, audio: 0, images: 0 };
+    const added = { projects: 0, ideas: 0, audio: 0, images: 0, boards: 0, nodes: 0, edges: 0 };
+    const skipped = { projects: 0, ideas: 0, audio: 0, images: 0, boards: 0, nodes: 0, edges: 0 };
 
     for (const p of inProjects) {
       if (!p || !p.id) continue;
@@ -289,6 +308,38 @@ window.Backup = (function () {
       await window.DB.put('ideas', next);
       ideaIds.add(next.id);
       added.ideas++;
+    }
+
+    /* The canvas goes in last and in order: boards, then cards, then lines. Each layer can
+       only be checked against the one below it. */
+    for (const b of inBoards) {
+      if (!b || !b.id) continue;
+      if (boardIds.has(b.id)) { skipped.boards++; continue; }
+      await window.DB.put('boards', b);
+      boardIds.add(b.id);
+      added.boards++;
+    }
+
+    for (const n of inNodes) {
+      if (!n || !n.id) continue;
+      // A card on a board that is not here has nowhere to live.
+      if (!boardIds.has(n.boardId)) { skipped.nodes++; continue; }
+      if (await window.DB.get('nodes', n.id)) { skipped.nodes++; continue; }
+      // A card pointing at an idea that did not come across keeps the text it was saved
+      // with, so it still reads as something rather than as an empty box.
+      await window.DB.put('nodes', n);
+      added.nodes++;
+    }
+
+    for (const e of inEdges) {
+      if (!e || !e.id || !e.from || !e.to) continue;
+      if (!boardIds.has(e.boardId)) { skipped.edges++; continue; }
+      // A line to a card that is not here would draw into nothing.
+      const [a, b] = await Promise.all([window.DB.get('nodes', e.from), window.DB.get('nodes', e.to)]);
+      if (!a || !b) { skipped.edges++; continue; }
+      if (await window.DB.get('edges', e.id)) { skipped.edges++; continue; }
+      await window.DB.put('edges', e);
+      added.edges++;
     }
 
     return { added, skipped, manifest };

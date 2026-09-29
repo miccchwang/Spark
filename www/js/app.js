@@ -14,7 +14,7 @@
     delArmed: false,
     pending: null,        // a finished capture waiting for its topic, not yet persisted:
                           // { kind: 'voice'|'text'|'photo', blob?, shots?, lat, lon, projectId }
-    speech: null,         // result of the offline recogniser probe
+    transLang: 'zh',      // language hint sent with an online transcription
     distill: null,        // the payload currently shown in the distill sheet
     mode: 'local',        // 'local' keeps everything on device; 'online' adds the backend
     contacts: [],
@@ -129,6 +129,14 @@
 
   function renderHeader() {
     const distillBtn = $('#distillBtn');
+    if (S.view === 'canvas') {
+      const h = window.Canvas.heading();
+      $('#viewTitle').textContent = h.title;
+      $('#viewSub').textContent = h.sub;
+      $('#recMeta').textContent = '新记录照旧存成灵感，画布上的卡片可以引用它们';
+      distillBtn.hidden = true;
+      return;
+    }
     if (S.view === 'todos') {
       $('#viewTitle').textContent = '待办';
       $('#viewSub').textContent = openTodos().length + ' / ' + S.todos.length + ' 项';
@@ -180,6 +188,13 @@
     rail.innerHTML = '';
     rail.appendChild(makeChip({ drop: 'inbox', label: '收件箱', icon: 'tray', count: countIn(null), active: S.view === 'inbox' }));
     rail.appendChild(makeChip({ drop: 'todos', label: '待办', icon: 'check', count: openTodos().length, active: S.view === 'todos' }));
+    rail.appendChild(makeChip({
+      drop: 'canvas',
+      label: '画布',
+      icon: 'board',
+      count: window.Canvas.count(),
+      active: S.view === 'canvas',
+    }));
     if (S.mode === 'online') {
       rail.appendChild(makeChip({
         drop: 'people',
@@ -202,6 +217,7 @@
   function renderList() {
     const list = $('#ideaList');
     list.innerHTML = '';
+    if (S.view === 'canvas') { window.Canvas.render(list, canvasCtx()); return; }
     if (S.view === 'todos') { renderTodos(list); return; }
     if (S.view === 'people') { renderPeople(list); return; }
     if (S.view.indexOf('group:') === 0) { renderGroupView(list, S.view.slice(6)); return; }
@@ -284,12 +300,39 @@
     return el;
   }
 
-  function render() { renderRail(); renderList(); renderHeader(); syncPlayIcons(); }
+  /* What the canvas needs from the app: the live lists, so a reference card reads through to
+     its source rather than keeping a stale copy, and a way back into an idea's detail. */
+  const canvasCtx = () => ({
+    ideas: S.ideas,
+    todos: S.todos,
+    openIdea: (id) => openDetail(id),
+    // Opening or leaving a board changes the header and the rail too, and those belong to
+    // the app — so the canvas asks for a full render rather than drawing over the top.
+    refresh: render,
+  });
+
+  function render() {
+    const focus = S.view === 'canvas' && window.Canvas.focused();
+    // An open board wants the whole screen. Two stacked headers plus the project rail would
+    // eat a third of it, and the canvas carries its own bar with its own way back.
+    document.body.classList.toggle('cv-focus', focus);
+    $('#ideaList').classList.toggle('cv-host', focus);
+    renderRail();
+    renderList();
+    renderHeader();
+    syncPlayIcons();
+  }
 
   /* ---------------- drag to archive ---------------- */
   async function handleDrop(dropId, ideaId) {
     const i = findIdea(ideaId);
     if (!i) return;
+    // The rail's other entries — 待办, 社群, 画布 — are views, not projects. Without this
+    // guard a drop on one filed the idea under an id no list ever shows.
+    if (dropId !== 'inbox' && !S.projects.some((p) => p.id === dropId)) {
+      toast('这一栏不是项目，灵感放不进去');
+      return;
+    }
     const pid = dropId === 'inbox' ? null : dropId;
     if ((i.projectId || null) === pid) { toast('已经在这个项目里了'); return; }
     i.projectId = pid;
@@ -518,7 +561,8 @@
     // Only a recording has a player, and only a recording has anything to transcribe.
     const isVoice = kind === 'voice';
     $('#dPlayerWrap').hidden = !isVoice;
-    $('#dTransRow').hidden = !isVoice;
+    $('#dTransRow').hidden = !transRowVisible(kind);
+    resetTransStatus($('#dTransStatus'));
     $('#dDur').textContent = '00:00';
     $('#dSeek').value = 0;
     renderDetailShots(i);
@@ -807,8 +851,8 @@
     renderSaveShots();
     renderSaveProjects();
 
-    // Only a recording has anything to transcribe.
-    $('#sTransRow').hidden = kind !== 'voice';
+    // Only a recording has anything to transcribe, and only in the online edition.
+    $('#sTransRow').hidden = !transRowVisible(kind);
     resetTransStatus($('#sTransStatus'));
 
     $('#saveSheet').hidden = false;
@@ -992,7 +1036,9 @@
 
   async function discardPending() {
     if (!S.pending) return;
-    if ((S.pending.kind || 'voice') === 'voice') await window.Speech.cancel();
+    // Abandon any transcription still in flight so its answer cannot land in a dead form.
+    transToken++;
+    transBusy = false;
     S.pending = null;
     $('#saveSheet').hidden = true;
     $('#sShotsWrap').hidden = true;
@@ -1000,10 +1046,32 @@
     toast('已丢弃');
   }
 
-  /* ---------------- offline transcription ---------------- */
+  /* ---------------- online transcription ----------------
 
-  const TRANS_ICON = '<svg class="ico"><use href="#i-spark"/></svg>';
+     The bundled offline recogniser is gone. It cost 65 MB of acoustic model, a native Vosk
+     library for two ABIs and a largeHeap flag, and it could only ever do Chinese.
+
+     In local mode nothing here is offered at all: the row is removed from both sheets,
+     because the offline edition does not turn speech into text. In online mode the recording
+     goes to the transcribe edge function, which holds the speech service's key on the server
+     so it never ships inside the APK — see supabase/functions/transcribe/index.ts. */
+
+  const TRANS_ICON = '<svg class="ico"><use href="#i-plane"/></svg>';
   let transBusy = false;
+  /* Bumped whenever a run starts or the thing it was writing into goes away. A slow upload
+     that lands after the sheet was discarded would otherwise type into a dead form. */
+  let transToken = 0;
+
+  /** A transcribe row is worth showing only for a recording, and only in the online edition. */
+  const transRowVisible = (kind) => kind === 'voice' && S.mode === 'online';
+
+  /** Whether transcription is available right now, and if not, the sentence that says why. */
+  function transState() {
+    if (S.mode !== 'online') return { ok: false, reason: '' };
+    if (!window.Api.isConfigured()) return { ok: false, reason: '先在设置里填好后端地址，才能联网转写' };
+    if (!window.Api.isSignedIn()) return { ok: false, reason: '登录之后才能联网转写' };
+    return { ok: true, reason: '录音会发到你的后端识别，服务商的密钥不在手机上' };
+  }
 
   function setTransStatus(el, text, busy) {
     el.textContent = text;
@@ -1011,47 +1079,50 @@
   }
 
   function resetTransStatus(el) {
-    const ok = S.speech && S.speech.ok;
-    setTransStatus(el, ok ? '不联网，在本机把录音变成文字' : ((S.speech && S.speech.reason) || '正在检查离线识别引擎…'), false);
+    const st = transState();
+    if (S.mode !== 'online') { setTransStatus(el, '', false); return; }
+    setTransStatus(el, st.reason, false);
   }
 
-  function applySpeechSupport() {
-    const ok = !!(S.speech && S.speech.ok);
+  /** Re-answer "can we transcribe?" after anything that could change the answer: the mode
+      switch, signing in, or saving a backend address. */
+  function applyTransSupport() {
+    const st = transState();
+    const online = S.mode === 'online';
+    // Local mode removes the affordance rather than greying it out. A disabled button would
+    // only invite the question of why it is there.
+    [$('#dTransRow'), $('#sTransRow')].forEach((row) => { if (row) row.hidden = !online; });
     [$('#dTranscribe'), $('#sTranscribe')].forEach((b) => {
-      b.disabled = !ok;
-      b.innerHTML = TRANS_ICON + '离线转写';
+      if (!b) return;
+      b.disabled = !st.ok;
+      b.innerHTML = TRANS_ICON + '在线转写';
     });
     resetTransStatus($('#dTransStatus'));
     resetTransStatus($('#sTransStatus'));
   }
 
   /**
-   * Runs the recogniser over a recorded blob and hands the text to onText(text, streaming).
-   * Nothing leaves the device — see js/speech.js.
+   * Send a recording off to be transcribed, then hand the text to onText(text, false).
+   *
+   * The second argument of onText used to mean "this is a partial, keep streaming". There is
+   * no streaming over a single request, so it is always false now — callers keep the
+   * signature because the distinction still reads well at the call site.
    */
   async function transcribeBlob(blob, btn, status, onText) {
-    if (!(S.speech && S.speech.ok)) { toast((S.speech && S.speech.reason) || '离线转写不可用'); return; }
+    const st = transState();
+    if (!st.ok) { toast(st.reason || '在线转写不可用'); return; }
     if (transBusy) { toast('正在转写，稍等一下'); return; }
 
+    const mine = ++transToken;
     transBusy = true;
     btn.disabled = true;
     const t0 = Date.now();
-
-    window.Speech.onProgress((d) => {
-      setTransStatus(status, '首次使用，正在把语音模型装进本机… ' + (d.megabytes || 0) + ' MB', true);
-    });
+    setTransStatus(status, '正在上传并识别…', true);
 
     try {
-      setTransStatus(status, '正在识别…', true);
-      const text = await window.Speech.transcribe(blob, {
-        onUpdate: (u) => {
-          const done = Math.round(u.done / 16000);
-          const all = Math.round(u.total / 16000);
-          setTransStatus(status, '正在识别… ' + done + ' / ' + all + ' 秒', true);
-          const live = (u.text + u.partial).trim();
-          if (live) onText(live, true);
-        },
-      });
+      const r = await window.Api.transcribeAudio(blob, { lang: S.transLang });
+      if (mine !== transToken) return;   // the sheet was closed while this was in flight
+      const text = ((r && r.text) || '').trim();
       if (text) {
         onText(text, false);
         setTransStatus(status, '转写完成 · 用时 ' + fmtDur(Date.now() - t0), false);
@@ -1059,10 +1130,14 @@
         setTransStatus(status, '没听清内容，靠麦克风近一点再试一次', false);
       }
     } catch (e) {
-      setTransStatus(status, '转写失败：' + ((e && e.message) || '未知错误'), false);
+      if (mine === transToken) {
+        setTransStatus(status, '转写失败：' + ((e && e.message) || '未知错误'), false);
+      }
     } finally {
-      transBusy = false;
-      btn.disabled = false;
+      if (mine === transToken) {
+        transBusy = false;
+        btn.disabled = false;
+      }
     }
   }
 
@@ -2423,6 +2498,8 @@
     }
     renderSettings();
     render();
+    // The mode is half of the answer to "can we transcribe?" — re-answer it.
+    applyTransSupport();
   }
 
   function renderSettings() {
@@ -2471,6 +2548,8 @@
       toast('读取在线数据失败：' + ((e && e.message) || '未知错误'));
     }
     render();
+    // Signing in is the other half of the answer to "can we transcribe?".
+    applyTransSupport();
   }
 
   async function doAuth(mode) {
@@ -2833,6 +2912,7 @@
     S.projects = await window.DB.all('projects');
     S.ideas = await window.DB.all('ideas');
     S.todos = await window.DB.all('todos');
+    await window.Canvas.load();
     invalidateCorpus();
 
     // The online edition is opt-in and stays dormant until the user flips the switch in
@@ -2847,14 +2927,8 @@
 
     if (S.mode === 'online' && window.Api.isSignedIn()) refreshOnline();
 
-    // Probe the offline recogniser once, up front, so the transcribe buttons start in the
-    // right state instead of flipping after a sheet is already open.
-    try {
-      S.speech = await window.Speech.available();
-    } catch (e) {
-      S.speech = { ok: false, reason: '离线识别引擎不可用' };
-    }
-    applySpeechSupport();
+    // Settle the transcribe rows up front, so they do not flip state after a sheet is open.
+    applyTransSupport();
 
     // ask for durable storage; harmless if the browser declines without a gesture
     window.Backup.requestPersist();

@@ -1,15 +1,18 @@
 /* Spark — IndexedDB storage layer.
-   stores: projects, ideas, todos, audio, images
+   stores: projects, ideas, todos, audio, images, messages, boards, nodes, edges
    (audio and images are kept separate from ideas so the lists stay light — a card reads the
-   idea row only, never a megabyte of pixels). */
+   idea row only, never a megabyte of pixels. The canvas works the same way: a board row is
+   tiny, and its nodes and edges are separate rows so dragging one node writes one row
+   instead of rewriting the whole board.) */
 window.DB = (function () {
   const NAME = 'spark';
   /* v2 adds todos. Records carry ownerId/groupId/updatedAt/rev from the start even though
      the local edition leaves them null, so switching an install to the online edition does
      not need another migration.
      v3 adds images. An idea's kind ('voice' | 'text' | 'photo') is stored on the idea row;
-     older rows have no kind and are read as 'voice', which is what they are. */
-  const VER = 3;
+     older rows have no kind and are read as 'voice', which is what they are.
+     v4 adds the canvas: boards, nodes and edges. */
+  const VER = 4;
   let dbp = null;
 
   function open() {
@@ -48,6 +51,26 @@ window.DB = (function () {
           const s = db.createObjectStore('messages', { keyPath: 'id' });
           s.createIndex('threadId', 'threadId');
           s.createIndex('createdAt', 'createdAt');
+        }
+        if (!db.objectStoreNames.contains('boards')) {
+          const s = db.createObjectStore('boards', { keyPath: 'id' });
+          s.createIndex('updatedAt', 'updatedAt');
+        }
+        if (!db.objectStoreNames.contains('nodes')) {
+          // One board holds many nodes, so boardId is the index everything reads by.
+          const s = db.createObjectStore('nodes', { keyPath: 'id' });
+          s.createIndex('boardId', 'boardId');
+          s.createIndex('ideaId', 'ideaId');
+          s.createIndex('createdAt', 'createdAt');
+        }
+        if (!db.objectStoreNames.contains('edges')) {
+          // An edge is its own row rather than a list on the node, because deleting a node
+          // then has to remove exactly the edges that touch it — an index scan, not a
+          // rewrite of every node that happened to point at it.
+          const s = db.createObjectStore('edges', { keyPath: 'id' });
+          s.createIndex('boardId', 'boardId');
+          s.createIndex('from', 'from');
+          s.createIndex('to', 'to');
         }
       };
       req.onsuccess = () => resolve(req.result);

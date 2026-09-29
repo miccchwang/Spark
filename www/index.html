@@ -64,6 +64,9 @@
   <symbol id="i-go" viewBox="0 0 24 24"><path d="M9.6 5.4 16.2 12l-6.6 6.6"/></symbol>
   <symbol id="i-send" viewBox="0 0 24 24"><path d="M4.2 11.6 20.2 4.2 12.8 20.2l-2.1-6.5-6.5-2.1Z"/><path d="M20.2 4.2 10.7 13.7"/></symbol>
   <symbol id="i-camera" viewBox="0 0 24 24"><path d="M4.3 8.9a2 2 0 0 1 2-2h1.6l1.2-2.1h5.8l1.2 2.1h1.6a2 2 0 0 1 2 2v8.1a2 2 0 0 1-2 2H6.3a2 2 0 0 1-2-2V8.9Z"/><circle cx="12" cy="12.9" r="3.3"/></symbol>
+  <symbol id="i-board" viewBox="0 0 24 24"><rect x="3.4" y="4.2" width="17.2" height="15.6" rx="2.2"/><rect x="6.4" y="7.2" width="5.4" height="4" rx="1"/><rect x="12.8" y="13" width="5" height="3.6" rx="1"/><path d="M11.9 9.2h1.4v3.8"/></symbol>
+  <symbol id="i-link" viewBox="0 0 24 24"><circle cx="6.6" cy="17.4" r="2.7"/><circle cx="17.4" cy="6.6" r="2.7"/><path d="M8.7 15.3 15.3 8.7"/></symbol>
+  <symbol id="i-fit" viewBox="0 0 24 24"><path d="M4.1 9.4V4.1h5.3M19.9 9.4V4.1h-5.3M4.1 14.6v5.3h5.3M19.9 14.6v5.3h-5.3"/></symbol>
 </svg>
 
 <header class="topbar">
@@ -143,9 +146,10 @@
     <input type="text" id="dName" class="field" placeholder="给这个灵感起个名字">
     <textarea id="dNote" class="field" rows="3" placeholder="补充文字备注…"></textarea>
 
-    <div class="transrow" id="dTransRow">
-      <button class="mini-btn" id="dTranscribe"><svg class="ico"><use href="#i-spark"/></svg>离线转写</button>
-      <span class="transstatus" id="dTransStatus">不联网，在本机把录音变成文字</span>
+    <!-- 转写只在在线版出现：本地版不转文字，这一行会被整行移除 -->
+    <div class="transrow" id="dTransRow" hidden>
+      <button class="mini-btn" id="dTranscribe"><svg class="ico"><use href="#i-plane"/></svg>在线转写</button>
+      <span class="transstatus" id="dTransStatus"></span>
     </div>
 
     <div class="meta" id="dMeta"></div>
@@ -178,9 +182,9 @@
     <input type="text" id="sTitle" class="field" placeholder="主题，例如「登录页的动效想法」" autocomplete="off">
     <textarea id="sNote" class="field" rows="3" placeholder="补充信息（可选）"></textarea>
 
-    <div class="transrow" id="sTransRow">
-      <button class="mini-btn" id="sTranscribe"><svg class="ico"><use href="#i-spark"/></svg>离线转写</button>
-      <span class="transstatus" id="sTransStatus">不联网，在本机把刚才说的话变成文字</span>
+    <div class="transrow" id="sTransRow" hidden>
+      <button class="mini-btn" id="sTranscribe"><svg class="ico"><use href="#i-plane"/></svg>在线转写</button>
+      <span class="transstatus" id="sTransStatus"></span>
     </div>
 
     <div class="pick-label">归档到</div>
@@ -409,10 +413,10 @@
 <script src="js/backup.js"></script>
 <script src="js/recorder.js"></script>
 <script src="js/image.js"></script>
-<script src="js/speech.js"></script>
 <script src="js/summarize.js"></script>
 <script src="js/commands.js"></script>
 <script src="js/dnd.js"></script>
+<script src="js/canvas.js"></script>
 <script src="js/app.js"></script>
 </body>
 </html>

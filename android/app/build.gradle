@@ -7,14 +7,9 @@ android {
         applicationId "com.spark.ideas"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 6
-        versionName "2.4"
+        versionCode 7
+        versionName "2.5"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
-        // libvosk.so ships for four ABIs (35 MB total). Phones are arm, so drop the two
-        // emulator-only x86 builds and keep the download ~19 MB smaller.
-        ndk {
-            abiFilters 'arm64-v8a', 'armeabi-v7a'
-        }
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
@@ -41,9 +36,6 @@ dependencies {
     implementation "androidx.coordinatorlayout:coordinatorlayout:$androidxCoordinatorLayoutVersion"
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')
-    // Offline speech to text. Vosk bundles Kaldi + its own libvosk.so for every ABI, and the
-    // language models live in src/main/assets so nothing has to be downloaded at runtime.
-    implementation "com.alphacephei:vosk-android:$voskVersion"
     testImplementation "junit:junit:$junitVersion"
     androidTestImplementation "androidx.test.ext:junit:$androidxJunitVersion"
     androidTestImplementation "androidx.test.espresso:espresso-core:$androidxEspressoCoreVersion"

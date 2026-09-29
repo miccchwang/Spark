@@ -1136,4 +1136,205 @@ body {
 .send-btn:active { background: var(--paper); color: var(--ink); }
 .send-btn:disabled { opacity: .45; }
 
+/* ============================================================
+   画布 — a board you pan, zoom and draw on
+   Same two colours. Selection is a thicker rule, a borrowed
+   card carries a second hairline, and the grid is real lines.
+   ============================================================ */
+
+/* ---------- an open board takes the screen ---------- */
+/* Two stacked headers and the project rail would eat a third of the board, and the canvas
+   has its own bar with its own way back. */
+body.cv-focus .viewhead,
+body.cv-focus .rail { display: none; }
+
+/* The canvas does its own panning, so the list must stop scrolling underneath it. */
+.list.cv-host {
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.cv-wrap {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* ---------- the board's own bar ---------- */
+.cv-bar {
+  flex: none;
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 12px;
+  border-bottom: var(--line) solid var(--ink);
+}
+.cv-btn {
+  position: relative;
+  flex: none;
+  width: 44px; height: 44px;
+  display: grid; place-items: center;
+  border: none; background: transparent; color: var(--ink);
+  cursor: pointer; padding: 0;
+  border-radius: var(--r-sm);
+}
+.cv-btn:active { background: var(--ink); color: var(--paper); }
+.cv-name {
+  flex: 1; min-width: 0;
+  text-align: left;
+  padding: 8px 6px;
+  border: none; background: transparent; color: var(--ink);
+  font-family: inherit; font-size: 17px; font-weight: 750; letter-spacing: -.01em;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  cursor: pointer;
+}
+
+/* ---------- the surface ---------- */
+.cv-stage {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  overflow: hidden;
+  /* the stage owns every gesture on it: pan, drag, pinch */
+  touch-action: none;
+  cursor: grab;
+}
+.cv-stage:active { cursor: grabbing; }
+
+.cv-world {
+  position: absolute; left: 0; top: 0;
+  width: 4000px; height: 4000px;
+  transform-origin: 0 0;
+  will-change: transform;
+}
+
+.cv-edges {
+  position: absolute; left: 0; top: 0;
+  color: var(--ink);
+  overflow: visible;
+  pointer-events: none;
+}
+/* The grid fades as you zoom out, so a wide board reads as a clean field rather than noise. */
+.cv-edges .grid { opacity: .13; }
+.cv-edges path {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 2.2;
+  stroke-linecap: round;
+}
+.cv-edges path.head { fill: currentColor; stroke: none; }
+
+/* ---------- a card ---------- */
+.cv-node {
+  position: absolute;
+  padding: 10px 12px 12px;
+  border: var(--line) solid var(--ink);
+  border-radius: var(--r-md);
+  background: var(--paper); color: var(--ink);
+  cursor: grab;
+  /* the stage handles the gesture, so the card must not start its own text selection */
+  user-select: none; -webkit-user-select: none;
+}
+.cv-node.dragging { cursor: grabbing; }
+/* A selected card is a heavier rule, not a colour. */
+.cv-node.sel { border-width: 3px; }
+/* The first end of a connection-in-progress is dashed, the way an unfinished thing is. */
+.cv-node.from { border-style: dashed; border-width: 3px; }
+
+.cv-node-top { display: flex; align-items: center; gap: 6px; min-height: 0; }
+.cv-tag {
+  display: inline-flex; align-items: center;
+  padding: 2px 5px;
+  border: var(--line) solid var(--ink);
+  border-radius: 999px;
+  /* a borrowed card is marked by a second hairline, never by a tint */
+  opacity: .85;
+}
+.cv-node-text {
+  margin: 6px 0 0;
+  font-size: 13.5px; line-height: 1.5; font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.cv-node-top:empty + .cv-node-text { margin-top: 0; }
+.cv-node-text.blank { opacity: .45; font-weight: 500; }
+.cv-node.done .cv-node-text { text-decoration: line-through; opacity: .6; }
+
+/* ---------- the tools ---------- */
+.cv-tools {
+  flex: none;
+  display: flex; gap: 8px;
+  padding: 10px 14px;
+  /* The record bar floats over the bottom of the screen, so the tools have to reserve room
+     for it or they end up underneath it. It measures 121px — 12px of padding, the meta
+     line, a 9px gap, the 68px button row and 18px of padding — and .list already reserves
+     148px for it. Same number here, so the canvas lines up with every other list. */
+  padding-bottom: calc(148px + var(--safe-bottom));
+}
+.cv-tool {
+  flex: 1;
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px;
+  min-height: 52px;
+  border: var(--line) solid var(--ink);
+  border-radius: var(--r-md);
+  background: var(--paper); color: var(--ink);
+  font-family: inherit; font-size: 11px; font-weight: 700;
+  cursor: pointer;
+}
+.cv-tool:active { background: var(--ink); color: var(--paper); }
+.cv-tool.on { background: var(--ink); color: var(--paper); }
+
+/* The hint sits just above the tools and never eats a touch. */
+.cv-hint {
+  flex: none;
+  margin: 0 14px 6px;
+  padding: 7px 11px;
+  border-left: 3px solid var(--ink);
+  font-size: 11.5px; font-weight: 650;
+  opacity: .78;
+  pointer-events: none;
+}
+
+/* ---------- the board list ---------- */
+.cv-head { padding: 2px 0 4px; }
+.cv-lead {
+  margin: 0;
+  font-size: 12.5px; line-height: 1.7;
+  opacity: .72;
+}
+.cv-board-card { cursor: pointer; }
+.cv-chev { display: grid; place-items: center; opacity: .55; }
+.cv-new {
+  display: flex; align-items: center; justify-content: center; gap: 8px;
+  padding: 14px;
+  border: var(--line) dashed var(--ink);
+  border-radius: var(--r-md);
+  background: var(--paper); color: var(--ink);
+  font-family: inherit; font-size: 14px; font-weight: 700;
+  cursor: pointer;
+}
+.cv-new:active { background: var(--ink); color: var(--paper); }
+
+/* ---------- the reference panel in a card's sheet ---------- */
+.cv-refbox {
+  padding: 11px 13px;
+  border: var(--line) solid var(--ink);
+  border-left-width: 4px;
+  border-radius: var(--r-sm);
+  margin-bottom: 10px;
+}
+.cv-refbox-head {
+  display: flex; align-items: center; gap: 6px;
+  font-size: 10px; font-weight: 750;
+  letter-spacing: .14em; text-transform: uppercase;
+  opacity: .66;
+}
+.cv-refbox-text {
+  margin: 7px 0 0;
+  font-size: 13.5px; line-height: 1.55; font-weight: 650;
+  overflow-wrap: anywhere;
+}
+.cv-refbox.gone .cv-refbox-text { text-decoration: line-through; opacity: .55; }
+
 [hidden] { display: none !important; }
